@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.remocall" "\0"
-            VALUE "FileDescription", "remocall_flutter" "\0"
+            VALUE "CompanyName", "SnapPay" "\0"
+            VALUE "FileDescription", "SnapPay" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "remocall_flutter" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 com.remocall. All rights reserved." "\0"
-            VALUE "OriginalFilename", "remocall_flutter.exe" "\0"
-            VALUE "ProductName", "remocall_flutter" "\0"
+            VALUE "InternalName", "SnapPay" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2025 SnapPay. All rights reserved." "\0"
+            VALUE "OriginalFilename", "SnapPay.exe" "\0"
+            VALUE "ProductName", "SnapPay" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
