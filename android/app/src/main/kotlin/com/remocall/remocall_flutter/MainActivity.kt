@@ -89,6 +89,10 @@ class MainActivity : FlutterActivity() {
                 "getBatterySettings" -> {
                     result.success(getBatterySettings())
                 }
+                "openBatterySettings" -> {
+                    openBatterySettings()
+                    result.success(true)
+                }
                 else -> {
                     result.notImplemented()
                 }
@@ -304,12 +308,23 @@ class MainActivity : FlutterActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
                 
-                // 1. 배터리 최적화 제외 여부
-                val isIgnoringBatteryOptimizations = powerManager.isIgnoringBatteryOptimizations(packageName)
-                settings["batteryOptimizationExempt"] = isIgnoringBatteryOptimizations
-                Log.d(TAG, "Battery optimization exempt: $isIgnoringBatteryOptimizations")
                 
-                // 2. 사용하지 않는 앱을 절전 상태로 전환 (앱 대기 버킷)
+                // 2. 절전 모드 활성화 여부 확인
+                val isPowerSaveMode = powerManager.isPowerSaveMode()
+                settings["powerSaveMode"] = isPowerSaveMode
+                Log.d(TAG, "Power save mode enabled: $isPowerSaveMode")
+                
+                // 3. 백그라운드 제한 확인 (Android P 이상)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                    val isBackgroundRestricted = activityManager.isBackgroundRestricted()
+                    settings["backgroundRestricted"] = isBackgroundRestricted
+                    Log.d(TAG, "Background restricted: $isBackgroundRestricted")
+                } else {
+                    settings["backgroundRestricted"] = false
+                }
+                
+                // 4. 사용하지 않는 앱을 절전 상태로 전환 (앱 대기 버킷)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
                     val appStandbyBucket = usageStatsManager.getAppStandbyBucket()
@@ -321,7 +336,7 @@ class MainActivity : FlutterActivity() {
                     settings["appStandbyDisabled"] = true
                 }
                 
-                // 3. 미사용 앱 자동으로 사용 해제 - Android에서 직접 확인 불가
+                // 5. 미사용 앱 자동으로 사용 해제 - Android에서 직접 확인 불가
                 settings["unusedAppDisabled"] = true // 기본값
                 
                 Log.d(TAG, "Battery settings: $settings")
@@ -336,6 +351,22 @@ class MainActivity : FlutterActivity() {
     private fun requestNotificationAccess() {
         val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
         startActivity(intent)
+    }
+    
+    private fun openBatterySettings() {
+        try {
+            val intent = Intent()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                intent.action = Settings.ACTION_BATTERY_SAVER_SETTINGS
+            } else {
+                intent.action = Settings.ACTION_SETTINGS
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            // 배터리 설정이 없으면 일반 설정으로
+            val intent = Intent(Settings.ACTION_SETTINGS)
+            startActivity(intent)
+        }
     }
     
     private fun isKakaoPayNotificationEnabled(): Boolean {

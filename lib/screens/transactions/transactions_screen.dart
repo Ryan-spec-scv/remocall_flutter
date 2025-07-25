@@ -238,7 +238,8 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       body: Column(
         children: [
           // 필터 섹션
-          Container(
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: Theme.of(context).cardTheme.color,
@@ -255,29 +256,36 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                  // 기간 선택 탭
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        _buildPeriodChip('all', '전체'),
-                        const SizedBox(width: 8),
-                        _buildPeriodChip('month', '이번 달'),
-                        const SizedBox(width: 8),
-                        _buildPeriodChip('week', '이번 주'),
-                        const SizedBox(width: 8),
-                        _buildPeriodChip('today', '오늘'),
-                      ],
-                    ),
+                // 기간 선택 탭
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _buildPeriodChip('all', '전체'),
+                      const SizedBox(width: 8),
+                      _buildPeriodChip('month', '이번 달'),
+                      const SizedBox(width: 8),
+                      _buildPeriodChip('week', '이번 주'),
+                      const SizedBox(width: 8),
+                      _buildPeriodChip('today', '오늘'),
+                    ],
                   ),
-                  const SizedBox(height: 12),
-                  // 커스텀 날짜 필터 (전체 선택시에만 표시)
-                  if (_selectedPeriod == 'all')
-                    Row(
+                ),
+                const SizedBox(height: 12),
+                // 커스텀 날짜 필터 컨테이너 (애니메이션 처리)
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  height: _selectedPeriod == 'all' ? 48 : 0,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 200),
+                    opacity: _selectedPeriod == 'all' ? 1.0 : 0.0,
+                    child: SingleChildScrollView(
+                      physics: const NeverScrollableScrollPhysics(),
+                      child: Row(
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: _selectDateRange,
+                            onPressed: _selectedPeriod == 'all' ? _selectDateRange : null,
                             icon: const Icon(Icons.calendar_today, size: 18),
                             label: Text(
                               _startDate != null && _endDate != null
@@ -291,7 +299,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                             ),
                           ),
                         ),
-                        if (_startDate != null)
+                        if (_startDate != null && _selectedPeriod == 'all')
                           TextButton(
                             onPressed: () {
                               setState(() {
@@ -305,12 +313,15 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                           ),
                       ],
                     ),
-                ],
-              ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-            
-            // 거래 목록
-            Expanded(
+          ),
+          
+          // 거래 목록
+          Expanded(
               child: Consumer<TransactionProvider>(
                 builder: (context, provider, child) {
                   if (_isLoadingMore && _transactions.isEmpty) {

@@ -33,9 +33,7 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
   // 권한 및 상태 변수
   bool _hasNotificationAccess = false;
   bool _isServiceRunning = false;
-  bool _isBatterySaverExempt = false;
-  bool _isAppStandbyDisabled = false;
-  bool _isUnusedAppDisabled = false;
+  bool _isPowerSaveMode = false;
   Timer? _statusTimer;
   
   @override
@@ -79,9 +77,7 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
       setState(() {
         _hasNotificationAccess = false;
         _isServiceRunning = false;
-        _isBatterySaverExempt = false;
-        _isAppStandbyDisabled = false;
-        _isUnusedAppDisabled = false;
+        _isPowerSaveMode = false;
       });
       return;
     }
@@ -107,17 +103,13 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
           _isServiceRunning = isRunning ?? false;
           
           if (batterySettings != null) {
-            _isBatterySaverExempt = batterySettings['batteryOptimizationExempt'] ?? false;
-            _isAppStandbyDisabled = batterySettings['appStandbyDisabled'] ?? false;
-            _isUnusedAppDisabled = batterySettings['unusedAppDisabled'] ?? false;
+            _isPowerSaveMode = batterySettings['powerSaveMode'] ?? false;
           }
           
           print('[ShopProfile] UI State updated:');
           print('  - _hasNotificationAccess: $_hasNotificationAccess');
           print('  - _isServiceRunning: $_isServiceRunning');
-          print('  - _isBatterySaverExempt (배터리 최적화 화이트리스트): $_isBatterySaverExempt');
-          print('  - _isAppStandbyDisabled (앱 대기 비활성화): $_isAppStandbyDisabled');
-          print('  - _isUnusedAppDisabled: $_isUnusedAppDisabled');
+          print('  - _isPowerSaveMode (절전 모드): $_isPowerSaveMode');
         });
       }
     } on PlatformException catch (e) {
@@ -471,9 +463,11 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
                           style: AppTheme.headlineSmall,
                         ),
                         const SizedBox(height: 16),
-                        _buildStatusRow('알림 접근 권한', _hasNotificationAccess, Icons.notifications),
+                        _buildStatusRow('알림 접근 권한', _hasNotificationAccess, Icons.notifications,
+                          onSettingsTap: !_hasNotificationAccess ? () => _openNotificationSettings() : null),
                         const SizedBox(height: 12),
-                        _buildStatusRow('알림 모니터링 작동 중', _isServiceRunning, Icons.monitor_heart),
+                        _buildStatusRow('알림 모니터링 작동 중', _isServiceRunning, Icons.monitor_heart,
+                          onSettingsTap: !_isServiceRunning ? () => _openNotificationSettings() : null),
                         const SizedBox(height: 24),
                         Text(
                           '배터리 설정',
@@ -482,11 +476,9 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        _buildStatusRow('배터리 최적화 제외', _isBatterySaverExempt, Icons.battery_full),
-                        const SizedBox(height: 12),
-                        _buildStatusRow('사용하지 않는 앱 절전 상태 비활성화', _isAppStandbyDisabled, Icons.bedtime_off),
-                        const SizedBox(height: 12),
-                        _buildStatusRow('미사용 앱 자동 사용 해제 비활성화', _isUnusedAppDisabled, Icons.app_blocking),
+                        _buildStatusRow('절전 모드 비활성화', !_isPowerSaveMode, Icons.power_settings_new, 
+                          subtitle: _isPowerSaveMode ? '절전 모드가 켜져 있습니다' : null,
+                          onSettingsTap: _isPowerSaveMode ? () => _openBatterySettings() : null),
                       ],
                     ),
                   ),
@@ -827,39 +819,111 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
     );
   }
   
-  Widget _buildStatusRow(String label, bool status, IconData icon) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+
+  void _openNotificationSettings() async {
+    try {
+      await platform.invokeMethod('requestNotificationPermission');
+      // 1초 후 상태 재확인
+      Future.delayed(const Duration(seconds: 1), () {
+        _checkPermissionsAndStatus();
+      });
+    } on PlatformException catch (e) {
+      print('Failed to request permission: ${e.message}');
+    }
+  }
+
+  void _openBatterySettings() async {
+    try {
+      await platform.invokeMethod('openBatterySettings');
+    } catch (e) {
+      print('Error opening battery settings: $e');
+    }
+  }
+
+  Widget _buildStatusRow(String label, bool status, IconData icon, {
+    bool isGoodWhenTrue = true, 
+    String? subtitle,
+    VoidCallback? onSettingsTap,
+  }) {
+    final isGood = isGoodWhenTrue ? status : !status;
+    
+    return Column(
       children: [
         Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Icon(
-              icon,
-              size: 20,
-              color: status ? Colors.green : Colors.orange,
+            Expanded(
+              child: Row(
+                children: [
+                  Icon(
+                    icon,
+                    size: 20,
+                    color: isGood ? Colors.green : Colors.orange,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: AppTheme.bodyMedium,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(width: 12),
-            Text(
-              label,
-              style: AppTheme.bodyMedium,
-            ),
+            if (onSettingsTap != null && !isGood)
+              GestureDetector(
+                onTap: onSettingsTap,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppTheme.primaryColor,
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    '설정하기',
+                    style: TextStyle(
+                      color: AppTheme.primaryColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              )
+            else
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isGood ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  status ? '확인' : '미확인',
+                  style: TextStyle(
+                    color: isGood ? Colors.green : Colors.orange,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
           ],
         ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          decoration: BoxDecoration(
-            color: status ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            status ? '활성화' : '비활성화',
-            style: TextStyle(
-              color: status ? Colors.green : Colors.orange,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+        if (subtitle != null) ...[
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 32),
+            child: Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.orange,
+              ),
             ),
           ),
-        ),
+        ],
       ],
     );
   }

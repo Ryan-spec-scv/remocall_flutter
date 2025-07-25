@@ -4,7 +4,7 @@ class AppConfig {
   static const String apiBaseUrlDev = 'https://kakaopay-admin-api.flexteam.kr'; // 개발용
   
   // 현재 환경 (true: 프로덕션, false: 개발)
-  static const bool isProduction = false;
+  static const bool isProduction = true;
   
   // 실제 사용할 API URL
   static String get baseUrl => isProduction ? apiBaseUrl : apiBaseUrlDev;
