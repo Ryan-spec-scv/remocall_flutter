@@ -45,6 +45,14 @@ void main() async {
       );
       await Workmanager().cancelAll();
     }
+
+    // Android에서만 화면 방향 제한
+    if (Platform.isAndroid) {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+    }
   
   // Register periodic sync task - 비활성화
   // await Workmanager().registerPeriodicTask(
