@@ -1,0 +1,187 @@
+{
+  "timestamp": "2025-07-18T01:10:23Z",
+  "shop_code": "0101",
+  "api_responses": {
+    "auth_me": {
+      "success": true,
+      "data": {
+        "id": 4,
+        "code": "0101",
+        "name": "강남1",
+        "type": "shop",
+        "is_active": true,
+        "pricing_plan": "prepaid_with_fee",
+        "pricing_plan_name": "요율",
+        "fee_rate": "1.60",
+        "settlement_day": 25,
+        "monthly_flat_fee_amount": null,
+        "current_credit_balance": "-9600.00",
+        "overdraft_amount": "9600.00",
+        "monthly_prepaid_amount": "0.00",
+        "domain": {
+          "subdomain": "secure-fafca4",
+          "full_domain": "secure-fafca4.snappay.online",
+          "has_domain": true
+        }
+      }
+    },
+    "balance": {
+      "success": true,
+      "data": {
+        "unsettled_fee": {
+          "amount": 0,
+          "transaction_count": 0,
+          "last_transaction_at": null
+        },
+        "transaction_summary": {
+          "total_transactions": 2,
+          "total_transaction_amount": 600000,
+          "estimated_total_fee": 9600
+        },
+        "shop_info": {
+          "code": "0101",
+          "name": "강남1",
+          "fee_rate": 1.6,
+          "is_active": true
+        }
+      }
+    },
+    "transactions": {
+      "success": true,
+      "data": {
+        "transactions": [
+          {
+            "id": 14,
+            "amount": "1000000.00",
+            "depositor_name": "김미미",
+            "status": "expired",
+            "qr_code": "34960217",
+            "created_at": "2025-01-18T00:29:22.272Z",
+            "completed_at": null
+          },
+          {
+            "id": 13,
+            "amount": "1000000.00",
+            "depositor_name": "김미주",
+            "status": "expired",
+            "qr_code": "18760109",
+            "created_at": "2025-01-18T00:02:21.619Z",
+            "completed_at": null
+          },
+          {
+            "id": 2,
+            "amount": "100000.00",
+            "depositor_name": "미미미",
+            "status": "completed",
+            "qr_code": "84923545",
+            "created_at": "2025-01-16T16:32:47.946Z",
+            "completed_at": "2025-01-16T16:33:19.215Z"
+          },
+          {
+            "id": 1,
+            "amount": "500000.00",
+            "depositor_name": "김문제",
+            "status": "completed",
+            "qr_code": "79986657",
+            "created_at": "2025-01-16T16:24:23.876Z",
+            "completed_at": "2025-01-16T16:25:26.293Z"
+          }
+        ],
+        "stats": {
+          "total_transactions": 4,
+          "completed_transactions": 2,
+          "total_amount": 600000,
+          "pending_transactions": 0
+        },
+        "pagination": {
+          "current_page": 1,
+          "total_pages": 1,
+          "total_items": 4,
+          "items_per_page": 20,
+          "has_next": false,
+          "has_prev": false
+        }
+      }
+    },
+    "dashboard": {
+      "success": true,
+      "data": {
+        "shop": {
+          "code": "0101",
+          "name": "강남1",
+          "fee_rate": 1.6
+        },
+        "unsettled_fee": {
+          "total_amount": 0,
+          "transaction_count": 0,
+          "last_updated": null
+        },
+        "today_stats": {
+          "total_transactions": 2,
+          "completed_transactions": 0,
+          "completed_amount": 0,
+          "estimated_fee": 0,
+          "pending_transactions": 0
+        },
+        "recent_transactions": [
+          {
+            "id": 14,
+            "amount": "1000000.00",
+            "depositor_name": "김미미",
+            "status": "expired",
+            "created_at": "2025-01-18T00:29:22.272Z"
+          },
+          {
+            "id": 13,
+            "amount": "1000000.00",
+            "depositor_name": "김미주",
+            "status": "expired",
+            "created_at": "2025-01-18T00:02:21.619Z"
+          },
+          {
+            "id": 2,
+            "amount": "100000.00",
+            "depositor_name": "미미미",
+            "status": "completed",
+            "created_at": "2025-01-16T16:32:47.946Z"
+          },
+          {
+            "id": 1,
+            "amount": "500000.00",
+            "depositor_name": "김문제",
+            "status": "completed",
+            "created_at": "2025-01-16T16:24:23.876Z"
+          }
+        ]
+      }
+    },
+    "transaction_detail": {
+      "success": true,
+      "data": {
+        "transaction": {
+          "id": 1,
+          "amount": "500000.00",
+          "depositor_name": "김문제",
+          "status": "completed",
+          "qr_code": "79986657",
+          "created_at": "2025-01-16T16:24:23.876Z",
+          "completed_at": "2025-01-16T16:25:26.293Z"
+        }
+      }
+    },
+    "app_version": {
+      "success": true,
+      "message": "최신 앱 버전 정보 조회 성공",
+      "data": {
+        "latest_version": "1.0.6",
+        "download_url": "https://admin-api.snappay.online/uploads/apk/app_v1.0.6_1752800505282.apk",
+        "release_notes": "플로팅 버튼 활성화 및 매장정보 표시 개선",
+        "version_code": 10006,
+        "file_size": "24850447",
+        "file_size_formatted": "23.7 MB",
+        "is_required": false,
+        "release_date": "2025-01-18T01:01:45.283Z"
+      }
+    }
+  }
+}

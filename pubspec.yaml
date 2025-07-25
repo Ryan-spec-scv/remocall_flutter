@@ -1,0 +1,78 @@
+name: remocall_flutter
+description: DepositPro - 스마트 입금 관리 시스템
+publish_to: 'none'
+version: 1.0.26+26
+
+# 앱 메타데이터
+app_info:
+  version_name: "1.0.26"
+  changelog: "Windows 플랫폼 지원 추가 및 크로스 플랫폼 빌드"
+  version_date: "2025-07-25"
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  
+  # UI
+  cupertino_icons: ^1.0.6
+  google_fonts: ^6.1.0
+  flutter_animate: ^4.3.0
+  
+  # State Management
+  provider: ^6.1.1
+  
+  # Network
+  dio: ^5.4.0
+  web_socket_channel: ^2.4.0
+  connectivity_plus: ^5.0.2
+  
+  # Local Storage
+  sqflite: ^2.3.0
+  path_provider: ^2.1.1
+  shared_preferences: ^2.2.2
+  
+  # Utilities
+  intl: ^0.20.2
+  uuid: ^4.2.1
+  permission_handler: ^11.1.0
+  url_launcher: ^6.2.2
+  package_info_plus: ^8.0.0
+  open_file: ^3.5.3
+  
+  # Background Tasks
+  workmanager: ^0.6.0
+  
+  # Platform Channels
+  flutter_local_notifications: ^17.0.0
+  
+  # Image & OCR
+  image_picker: ^1.0.4
+  # google_ml_kit: ^0.16.2  # Temporarily disabled due to build issues
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/fonts/
+    - assets/release-metadata.json
+    - CHANGELOG.md
+    - pubspec.yaml
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo.png"
+  adaptive_icon_background: "#2C3E50"
+  adaptive_icon_foreground: "assets/images/logo.png"

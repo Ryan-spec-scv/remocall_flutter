@@ -1,0 +1,145 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      build_android:
+        description: 'Build Android APK'
+        required: true
+        type: boolean
+        default: true
+      build_windows:
+        description: 'Build Windows EXE'
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.build_android == 'true'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.27.3'
+        channel: 'stable'
+    
+    - name: Get dependencies
+      run: flutter pub get
+    
+    - name: Build APK
+      run: flutter build apk --release
+    
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-release
+        path: build/app/outputs/flutter-apk/app-release.apk
+        retention-days: 7
+
+  build-windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+    if: github.event_name == 'push' || github.event.inputs.build_windows == 'true'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.27.3'
+        channel: 'stable'
+    
+    - name: Get dependencies
+      run: flutter pub get
+    
+    - name: Build Windows
+      run: flutter build windows --release
+    
+    - name: Create Windows Release Folder
+      run: |
+        mkdir windows-release
+        xcopy /E /I build\windows\x64\runner\Release windows-release\
+      shell: cmd
+    
+    - name: Create ZIP
+      run: Compress-Archive -Path windows-release\* -DestinationPath SnapPay-Windows.zip
+      shell: powershell
+    
+    - name: Upload Windows Build
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-release
+        path: SnapPay-Windows.zip
+        retention-days: 7
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-android, build-windows]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download Android APK
+      uses: actions/download-artifact@v4
+      with:
+        name: android-release
+        path: ./artifacts
+    
+    - name: Download Windows Build
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-release
+        path: ./artifacts
+    
+    - name: Get version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: SnapPay v${{ steps.get_version.outputs.VERSION }}
+        body: |
+          ## 다운로드
+          
+          ### Android
+          - [SnapPay-v${{ steps.get_version.outputs.VERSION }}.apk](https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/SnapPay-v${{ steps.get_version.outputs.VERSION }}.apk)
+          
+          ### Windows
+          - [SnapPay-Windows-v${{ steps.get_version.outputs.VERSION }}.zip](https://github.com/${{ github.repository }}/releases/download/v${{ steps.get_version.outputs.VERSION }}/SnapPay-Windows-v${{ steps.get_version.outputs.VERSION }}.zip)
+          
+          ## 설치 방법
+          
+          ### Android
+          1. APK 파일 다운로드
+          2. 설치 시 "알 수 없는 출처" 허용
+          3. 앱 실행 후 알림 권한 허용
+          
+          ### Windows
+          1. ZIP 파일 다운로드
+          2. 압축 해제
+          3. `remocall_flutter.exe` 실행
+          
+        files: |
+          ./artifacts/app-release.apk#SnapPay-v${{ steps.get_version.outputs.VERSION }}.apk
+          ./artifacts/SnapPay-Windows.zip#SnapPay-Windows-v${{ steps.get_version.outputs.VERSION }}.zip
+        draft: false
+        prerelease: false

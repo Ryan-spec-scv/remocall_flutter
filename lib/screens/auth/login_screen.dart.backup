@@ -1,0 +1,325 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:provider/provider.dart';
+import 'package:remocall_flutter/providers/auth_provider.dart';
+import 'package:remocall_flutter/providers/theme_provider.dart';
+import 'package:remocall_flutter/screens/home/home_screen.dart';
+import 'package:remocall_flutter/utils/theme.dart';
+import 'package:remocall_flutter/widgets/custom_button.dart';
+import 'package:remocall_flutter/widgets/custom_text_field.dart';
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _storeNumberController = TextEditingController();
+  final _authCodeController = TextEditingController();
+  bool _isAuthCodeSent = false;
+  bool _isLoading = false;
+  int _remainingSeconds = 0;
+
+  @override
+  void dispose() {
+    _storeNumberController.dispose();
+    _authCodeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _requestAuthCode() async {
+    if (_storeNumberController.text.length != 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('매장번호는 4자리여야 합니다'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final success = await authProvider.requestAuthCode(_storeNumberController.text);
+
+    if (!mounted) return;
+
+    setState(() => _isLoading = false);
+
+    if (success) {
+      setState(() {
+        _isAuthCodeSent = true;
+        _remainingSeconds = 300; // 5분
+      });
+      _startTimer();
+      
+      // 테스트용 인증코드 표시
+      final testAuthCode = authProvider.authCode;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('인증코드가 발송되었습니다${testAuthCode != null ? " (테스트: $testAuthCode)" : ""}'),
+          backgroundColor: AppTheme.successColor,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(authProvider.error ?? '인증코드 발송에 실패했습니다'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+    }
+  }
+
+  void _startTimer() {
+    Future.doWhile(() async {
+      await Future.delayed(const Duration(seconds: 1));
+      if (!mounted) return false;
+      
+      setState(() {
+        _remainingSeconds--;
+      });
+      
+      if (_remainingSeconds <= 0) {
+        setState(() {
+          _isAuthCodeSent = false;
+        });
+        return false;
+      }
+      
+      return true;
+    });
+  }
+
+  String get _timerText {
+    final minutes = _remainingSeconds ~/ 60;
+    final seconds = _remainingSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _handleLogin() async {
+    if (_formKey.currentState!.validate()) {
+      setState(() => _isLoading = true);
+
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final success = await authProvider.loginWithStore(
+        _storeNumberController.text,
+        _authCodeController.text,
+      );
+
+      if (!mounted) return;
+
+      setState(() => _isLoading = false);
+
+      if (success) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(authProvider.error ?? '로그인에 실패했습니다'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isDarkMode = themeProvider.themeMode == ThemeMode.dark;
+    
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 40),
+                Center(
+                  child: Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      gradient: isDarkMode 
+                        ? LinearGradient(
+                            colors: [AppTheme.primaryLight, AppTheme.primaryLight.withOpacity(0.7)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : AppTheme.primaryGradient,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: (isDarkMode ? AppTheme.primaryLight : AppTheme.primaryColor).withOpacity(0.3),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.phone_callback,
+                      size: 40,
+                      color: Colors.white,
+                    ),
+                  ),
+                )
+                    .animate()
+                    .fadeIn(duration: 600.ms)
+                    .scale(delay: 200.ms),
+                const SizedBox(height: 32),
+                Text(
+                  '매장 로그인',
+                  style: AppTheme.headlineLarge.copyWith(
+                    color: isDarkMode ? Colors.white : Colors.black87,
+                  ),
+                ).animate().fadeIn(delay: 400.ms).slideX(begin: -0.2, end: 0),
+                const SizedBox(height: 8),
+                Text(
+                  '매장번호를 입력하고 인증해주세요',
+                  style: AppTheme.bodyLarge.copyWith(
+                    color: isDarkMode ? Colors.grey[400] : Colors.grey[600],
+                  ),
+                ).animate().fadeIn(delay: 500.ms),
+                const SizedBox(height: 40),
+                
+                // 매장번호 입력
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: CustomTextField(
+                        controller: _storeNumberController,
+                        label: '매장번호',
+                        hint: '4자리 숫자',
+                        prefixIcon: Icons.store_outlined,
+                        keyboardType: TextInputType.number,
+                        enabled: !_isAuthCodeSent,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return '매장번호를 입력해주세요';
+                          }
+                          if (value.length != 4) {
+                            return '매장번호는 4자리여야 합니다';
+                          }
+                          if (!RegExp(r'^\d{4}$').hasMatch(value)) {
+                            return '숫자만 입력해주세요';
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 28),
+                      child: CustomButton(
+                        text: _isAuthCodeSent ? _timerText : '인증코드 받기',
+                        onPressed: (_isAuthCodeSent || _isLoading) ? null : _requestAuthCode,
+                        width: 120,
+                        isLoading: _isLoading && !_isAuthCodeSent,
+                      ),
+                    ),
+                  ],
+                ).animate().fadeIn(delay: 600.ms),
+                
+                if (_isAuthCodeSent) ...[
+                  const SizedBox(height: 16),
+                  CustomTextField(
+                    controller: _authCodeController,
+                    label: '인증코드',
+                    hint: '6자리 숫자',
+                    prefixIcon: Icons.lock_outline,
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return '인증코드를 입력해주세요';
+                      }
+                      if (value.length != 6) {
+                        return '인증코드는 6자리여야 합니다';
+                      }
+                      if (!RegExp(r'^\d{6}$').hasMatch(value)) {
+                        return '숫자만 입력해주세요';
+                      }
+                      return null;
+                    },
+                  ).animate().fadeIn(duration: 400.ms),
+                  
+                  const SizedBox(height: 8),
+                  Text(
+                    '* 인증코드는 5분 이내에 입력해주세요',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.warningColor,
+                    ),
+                  ).animate().fadeIn(duration: 400.ms),
+                ],
+                
+                const SizedBox(height: 24),
+                
+                CustomButton(
+                  text: '로그인',
+                  onPressed: (_isAuthCodeSent && !_isLoading) ? _handleLogin : null,
+                  isLoading: _isLoading && _isAuthCodeSent,
+                  isGradient: true,
+                ).animate().fadeIn(delay: 800.ms),
+                
+                const SizedBox(height: 32),
+                
+                // 테스트 정보
+                Card(
+                  color: isDarkMode 
+                    ? AppTheme.infoColor.withOpacity(0.2)
+                    : AppTheme.infoColor.withOpacity(0.1),
+                  elevation: isDarkMode ? 0 : 1,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline,
+                              color: AppTheme.infoColor,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '테스트 매장번호',
+                              style: AppTheme.bodyMedium.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.infoColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '• 1234 - 테스트 매장 1\n• 5678 - 테스트 매장 2\n• 9999 - 데모 매장',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: isDarkMode ? Colors.grey[400] : Colors.grey[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ).animate().fadeIn(delay: 900.ms),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,465 @@
+package com.remocall.remocall_flutter
+
+import android.Manifest
+import android.app.NotificationManager
+import android.content.BroadcastReceiver
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
+import android.text.TextUtils
+import android.util.Log
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+import kotlinx.coroutines.*
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+
+class MainActivity : FlutterActivity() {
+    
+    companion object {
+        private const val CHANNEL = "com.remocall/notifications"
+        private const val TEST_CHANNEL = "com.remocall.notification/test"
+        private const val TAG = "MainActivity"
+        private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1001
+    }
+    
+    private lateinit var methodChannel: MethodChannel
+    private lateinit var testMethodChannel: MethodChannel
+    private var notificationReceiver: BroadcastReceiver? = null
+    
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        
+        methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        testMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TEST_CHANNEL)
+        
+        methodChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "checkNotificationPermission" -> {
+                    // Check notification listener permission (NOT notification display permission)
+                    val isEnabled = isNotificationListenerEnabled()
+                    Log.d(TAG, "[MethodChannel] checkNotificationPermission result: $isEnabled")
+                    result.success(isEnabled)
+                }
+                "requestNotificationPermission" -> {
+                    requestNotificationAccess()
+                    result.success(null)
+                }
+                "isServiceRunning" -> {
+                    // Check if notification listener service is enabled
+                    val isRunning = isNotificationListenerEnabled()
+                    result.success(isRunning)
+                }
+                "onNotificationReceived" -> {
+                    // 테스트 알림 처리
+                    val data = call.arguments as? String
+                    if (data != null) {
+                        // Flutter로 다시 전송
+                        runOnUiThread {
+                            methodChannel.invokeMethod("onNotificationReceived", data)
+                        }
+                        result.success(true)
+                    } else {
+                        result.error("INVALID_ARGUMENT", "Data is null", null)
+                    }
+                }
+                "sendTestWebhook" -> {
+                    // 테스트용 웹훅 직접 호출
+                    val message = call.argument<String>("message") ?: "테스트 메시지"
+                    sendTestNotificationToServer(message)
+                    result.success(true)
+                }
+                "isKakaoPayNotificationEnabled" -> {
+                    result.success(isKakaoPayNotificationEnabled())
+                }
+                "isBatteryOptimizationEnabled" -> {
+                    result.success(isAppStandbyEnabled())
+                }
+                "getBatterySettings" -> {
+                    result.success(getBatterySettings())
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
+        
+        // 테스트 채널 핸들러
+        testMethodChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "sendTestNotification" -> {
+                    try {
+                        val args = call.arguments as HashMap<*, *>
+                        val notificationData = JSONObject().apply {
+                            put("packageName", args["packageName"] as String)
+                            put("sender", args["sender"] as String)
+                            put("message", args["message"] as String)
+                            put("timestamp", args["timestamp"] as Long)
+                            put("parsedData", JSONObject(args["parsedData"] as HashMap<*, *>))
+                        }
+                        
+                        Log.d(TAG, "Sending test notification: ${notificationData.toString()}")
+                        
+                        // Flutter로 알림 전송
+                        runOnUiThread {
+                            methodChannel.invokeMethod("onNotificationReceived", notificationData.toString())
+                        }
+                        
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error sending test notification", e)
+                        result.error("TEST_NOTIFICATION_ERROR", e.message, null)
+                    }
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
+    }
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        // Request notification permission for Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) 
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    NOTIFICATION_PERMISSION_REQUEST_CODE
+                )
+            }
+        }
+        
+        // Register broadcast receiver
+        notificationReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                Log.d(TAG, "BroadcastReceiver onReceive called")
+                
+                intent?.getStringExtra("data")?.let { data ->
+                    Log.d(TAG, "Received notification data: $data")
+                    
+                    try {
+                        // Send to Flutter directly
+                        runOnUiThread {
+                            Log.d(TAG, "Sending to Flutter via MethodChannel")
+                            methodChannel.invokeMethod("onNotificationReceived", data)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing notification data", e)
+                    }
+                } ?: run {
+                    Log.e(TAG, "No data in broadcast intent")
+                }
+            }
+        }
+        
+        val filter = IntentFilter("com.remocall.NOTIFICATION_RECEIVED")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(notificationReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(notificationReceiver, filter)
+        }
+        
+        // NotificationListenerService 권한 확인 및 서비스 시작 유도
+        if (isNotificationServiceEnabled()) {
+            Log.d(TAG, "Notification service is enabled")
+            // 알림 접근 권한 재설정으로 서비스 재시작 유도
+            tryRestartNotificationService()
+        } else {
+            Log.d(TAG, "Notification service is not enabled")
+            // 권한 요청
+            requestNotificationAccess()
+        }
+    }
+    
+    private fun tryRestartNotificationService() {
+        try {
+            // NotificationListenerService 재시작 유도
+            val componentName = ComponentName(this, NotificationService::class.java)
+            val pm = packageManager
+            pm.setComponentEnabledSetting(
+                componentName,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP
+            )
+            pm.setComponentEnabledSetting(
+                componentName,
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                PackageManager.DONT_KILL_APP
+            )
+            Log.d(TAG, "Triggered NotificationService restart")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error restarting NotificationService", e)
+        }
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        notificationReceiver?.let {
+            unregisterReceiver(it)
+        }
+    }
+    
+    private fun isNotificationServiceEnabled(): Boolean {
+        val componentName = ComponentName(this, NotificationService::class.java)
+        val flatComponent = componentName.flattenToString()
+        
+        // Force re-read from settings
+        contentResolver.notifyChange(Settings.Secure.getUriFor("enabled_notification_listeners"), null)
+        
+        val enabledListeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+        
+        val isEnabled = if (!TextUtils.isEmpty(enabledListeners)) {
+            // Check both flattened and short component name
+            enabledListeners.contains(flatComponent) || 
+            enabledListeners.contains(componentName.packageName + "/" + componentName.shortClassName)
+        } else {
+            false
+        }
+        
+        Log.d(TAG, "isNotificationServiceEnabled: $isEnabled")
+        Log.d(TAG, "Component name: $flatComponent")
+        Log.d(TAG, "Enabled listeners: $enabledListeners")
+        return isEnabled
+    }
+    
+    private fun isNotificationListenerEnabled(): Boolean {
+        // Check if notification listener permission is granted
+        // This is different from notification display permission
+        try {
+            val componentName = ComponentName(this, NotificationService::class.java)
+            val flatString = componentName.flattenToString()
+            
+            // Force fresh read from system settings
+            val enabledListeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+            
+            Log.d(TAG, "=== NOTIFICATION LISTENER CHECK ===")
+            Log.d(TAG, "Looking for component: $flatString")
+            Log.d(TAG, "Package name: $packageName")
+            Log.d(TAG, "Service class: ${NotificationService::class.java.name}")
+            Log.d(TAG, "Enabled listeners from Settings: $enabledListeners")
+            
+            if (enabledListeners.isNullOrEmpty()) {
+                Log.d(TAG, "Result: No notification listeners enabled at all")
+                return false
+            }
+            
+            // Try multiple matching patterns
+            val patterns = listOf(
+                flatString,
+                "$packageName/${NotificationService::class.java.name}",
+                "$packageName/${NotificationService::class.java.simpleName}",
+                "$packageName/.NotificationService"
+            )
+            
+            var found = false
+            for (pattern in patterns) {
+                if (enabledListeners.contains(pattern)) {
+                    Log.d(TAG, "Found match with pattern: $pattern")
+                    found = true
+                    break
+                }
+            }
+            
+            // Also check if any component starts with our package name
+            if (!found) {
+                val components = enabledListeners.split(":")
+                for (component in components) {
+                    if (component.trim().startsWith(packageName)) {
+                        Log.d(TAG, "Found component starting with package name: ${component.trim()}")
+                        found = true
+                        break
+                    }
+                }
+            }
+            
+            Log.d(TAG, "Result: Notification listener enabled = $found")
+            Log.d(TAG, "=== END NOTIFICATION LISTENER CHECK ===")
+            return found
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking notification listener", e)
+            return false
+        }
+    }
+    
+    private fun getBatterySettings(): HashMap<String, Boolean> {
+        val settings = HashMap<String, Boolean>()
+        
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                
+                // 1. 배터리 최적화 제외 여부
+                val isIgnoringBatteryOptimizations = powerManager.isIgnoringBatteryOptimizations(packageName)
+                settings["batteryOptimizationExempt"] = isIgnoringBatteryOptimizations
+                Log.d(TAG, "Battery optimization exempt: $isIgnoringBatteryOptimizations")
+                
+                // 2. 사용하지 않는 앱을 절전 상태로 전환 (앱 대기 버킷)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as android.app.usage.UsageStatsManager
+                    val appStandbyBucket = usageStatsManager.getAppStandbyBucket()
+                    // ACTIVE(10), WORKING_SET(20), FREQUENT(30), RARE(40), RESTRICTED(45)
+                    val isNotInStandby = appStandbyBucket <= android.app.usage.UsageStatsManager.STANDBY_BUCKET_FREQUENT
+                    settings["appStandbyDisabled"] = isNotInStandby
+                    Log.d(TAG, "App standby bucket: $appStandbyBucket, not in standby: $isNotInStandby")
+                } else {
+                    settings["appStandbyDisabled"] = true
+                }
+                
+                // 3. 미사용 앱 자동으로 사용 해제 - Android에서 직접 확인 불가
+                settings["unusedAppDisabled"] = true // 기본값
+                
+                Log.d(TAG, "Battery settings: $settings")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking battery settings", e)
+        }
+        
+        return settings
+    }
+    
+    private fun requestNotificationAccess() {
+        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+        startActivity(intent)
+    }
+    
+    private fun isKakaoPayNotificationEnabled(): Boolean {
+        // For now, return true as checking other app's notification status is restricted
+        // This would require special permissions or root access
+        return try {
+            // Check if KakaoTalk is installed
+            val pm = packageManager
+            val appInfo = pm.getApplicationInfo("com.kakao.talk", 0)
+            true // If app is installed, assume notifications are enabled
+        } catch (e: PackageManager.NameNotFoundException) {
+            Log.e(TAG, "KakaoTalk not installed", e)
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking KakaoTalk status", e)
+            false
+        }
+    }
+    
+    private fun isAppStandbyEnabled(): Boolean {
+        // '사용하지 않는 앱을 절전 상태로 전환' 메뉴의 '사용 안 함' 토글 상태 확인
+        // true = 절전 모드 활성화 (앱이 절전 상태로 전환될 수 있음)
+        // false = 절전 모드 비활성화 (앱이 계속 활성 상태)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                // 배터리 최적화 화이트리스트에 있으면 true
+                val isIgnoringBatteryOptimizations = powerManager.isIgnoringBatteryOptimizations(packageName)
+                
+                Log.d(TAG, "isIgnoringBatteryOptimizations (whitelist): $isIgnoringBatteryOptimizations")
+                
+                // 화이트리스트에 없으면(false) 절전 모드가 활성화된 것(true)
+                val isPowerSavingEnabled = !isIgnoringBatteryOptimizations
+                Log.d(TAG, "절전 모드 활성화 상태: $isPowerSavingEnabled")
+                
+                return isPowerSavingEnabled
+            } else {
+                return false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking battery optimization status", e)
+            return false
+        }
+    }
+    
+    private fun sendTestNotificationToServer(message: String) {
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "=== SEND TEST WEBHOOK START ===")
+                
+                // SharedPreferences에서 액세스 토큰과 shop_code 가져오기
+                val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                val accessToken = prefs.getString("flutter.access_token", null)
+                val shopCode = prefs.getString("flutter.shop_code", null)
+                
+                Log.d(TAG, "Access token exists: ${accessToken != null}")
+                Log.d(TAG, "Shop code: $shopCode")
+                
+                if (shopCode == null) {
+                    Log.w(TAG, "No shop code found, cannot send test notification")
+                    return@launch
+                }
+                
+                // API 호출을 위한 데이터 준비
+                val notificationData = JSONObject().apply {
+                    put("message", message)
+                    put("shop_code", shopCode)
+                }
+                
+                Log.d(TAG, "Sending test data: $notificationData")
+                
+                // HTTP 요청 직접 수행
+                val url = URL("https://admin-api.snappay.online/api/kakao-deposits/webhook")
+                val connection = url.openConnection() as HttpURLConnection
+                
+                try {
+                    connection.requestMethod = "POST"
+                    connection.setRequestProperty("Content-Type", "application/json")
+                    connection.setRequestProperty("X-API-Key", "KkP_Wh_9Qm7@L8xN3vR5tY1uE4wS6aD2fG7hJ9kM8nB5cX1zV4qP0oI3uY6tR9eW2sA7dF")
+                    if (accessToken != null) {
+                        connection.setRequestProperty("Authorization", "Bearer $accessToken")
+                        Log.d(TAG, "Authorization header added")
+                    }
+                    connection.connectTimeout = 10000
+                    connection.readTimeout = 10000
+                    connection.doOutput = true
+                    connection.doInput = true
+                    connection.useCaches = false
+                    
+                    Log.d(TAG, "Sending POST request to: $url")
+                    
+                    connection.outputStream.use { os ->
+                        val input = notificationData.toString().toByteArray(charset("utf-8"))
+                        os.write(input, 0, input.size)
+                    }
+                    
+                    val responseCode = connection.responseCode
+                    Log.d(TAG, "Server response code: $responseCode")
+                    
+                    if (responseCode == 200 || responseCode == 201) {
+                        val response = connection.inputStream.bufferedReader().use { it.readText() }
+                        Log.d(TAG, "✅ Test notification sent to server successfully")
+                        Log.d(TAG, "Server response: $response")
+                    } else {
+                        val errorStream = connection.errorStream
+                        val response = if (errorStream != null) {
+                            errorStream.bufferedReader().use { it.readText() }
+                        } else {
+                            "No error response"
+                        }
+                        Log.e(TAG, "❌ Server error ($responseCode): $response")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Connection error: ${e.message}", e)
+                } finally {
+                    connection.disconnect()
+                }
+                
+                Log.d(TAG, "=== SEND TEST WEBHOOK END ===")
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending test webhook: ${e.message}", e)
+                e.printStackTrace()
+            }
+        }
+    }
+}

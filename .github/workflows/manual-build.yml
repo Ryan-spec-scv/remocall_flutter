@@ -1,0 +1,41 @@
+name: Manual Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.27.3'
+        channel: 'stable'
+    
+    - name: Get dependencies
+      run: flutter pub get
+    
+    - name: Build Windows
+      run: flutter build windows --release
+    
+    - name: Create Release Archive
+      run: |
+        mkdir SnapPay-Windows
+        xcopy /E /I build\windows\x64\runner\Release SnapPay-Windows\
+      shell: cmd
+    
+    - name: Create ZIP
+      run: Compress-Archive -Path SnapPay-Windows\* -DestinationPath SnapPay-Windows-${{ github.run_number }}.zip
+      shell: powershell
+    
+    - name: Upload Windows Build
+      uses: actions/upload-artifact@v4
+      with:
+        name: SnapPay-Windows-Build-${{ github.run_number }}
+        path: SnapPay-Windows-${{ github.run_number }}.zip
+        retention-days: 30
