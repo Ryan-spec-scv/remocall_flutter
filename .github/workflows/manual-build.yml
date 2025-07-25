@@ -23,6 +23,12 @@ jobs:
     - name: Build Windows
       run: flutter build windows --release
     
+    - name: Copy Visual C++ Redistributables
+      run: |
+        Copy-Item "C:\Windows\System32\msvcp140.dll" -Destination "build\windows\x64\runner\Release\" -ErrorAction SilentlyContinue
+        Copy-Item "C:\Windows\System32\vcruntime140.dll" -Destination "build\windows\x64\runner\Release\" -ErrorAction SilentlyContinue
+        Copy-Item "C:\Windows\System32\vcruntime140_1.dll" -Destination "build\windows\x64\runner\Release\" -ErrorAction SilentlyContinue
+    
     - name: Create Release Archive
       run: |
         mkdir SnapPay-Windows
