@@ -13,6 +13,7 @@ import 'package:remocall_flutter/utils/theme.dart';
 import 'package:remocall_flutter/widgets/app_initializer.dart';
 import 'package:remocall_flutter/widgets/connectivity_wrapper.dart';
 import 'package:workmanager/workmanager.dart';
+import 'dart:io';
 
 // WorkManager callback
 @pragma('vm:entry-point')
@@ -25,20 +26,25 @@ void callbackDispatcher() {
 }
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  
-  // Initialize connectivity service
-  final connectivityService = ConnectivityService();
-  await connectivityService.initialize();
-  
-  // WorkManager 초기화 및 기존 작업 취소
-  await Workmanager().initialize(
-    callbackDispatcher,
-    isInDebugMode: true,
-  );
-  
-  // 기존에 등록된 모든 작업 취소
-  await Workmanager().cancelAll();
+    WidgetsFlutterBinding.ensureInitialized();
+
+    // Windows에서 디버그 메시지
+    if (Platform.isWindows) {
+      print('[SnapPay] Starting Windows application...');
+    }
+
+    // Initialize connectivity service
+    final connectivityService = ConnectivityService();
+    await connectivityService.initialize();
+
+    // Android에서만 WorkManager 초기화
+    if (Platform.isAndroid) {
+      await Workmanager().initialize(
+        callbackDispatcher,
+        isInDebugMode: true,
+      );
+      await Workmanager().cancelAll();
+    }
   
   // Register periodic sync task - 비활성화
   // await Workmanager().registerPeriodicTask(
