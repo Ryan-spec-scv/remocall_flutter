@@ -37,3 +37,10 @@
 
   # macOS
   .DS_Store
+# Build outputs
+  build/
+  .dart_tool/
+  *.apk
+  *.aab
+  *.exe
+  *.dll
