@@ -65,7 +65,6 @@ flutter:
   
   assets:
     - assets/images/
-    - assets/fonts/
     - assets/release-metadata.json
     - CHANGELOG.md
     - pubspec.yaml
