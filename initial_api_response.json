@@ -1,0 +1,83 @@
+{
+  "success": true,
+  "data": {
+    "shop": {
+      "id": 4,
+      "code": "0101",
+      "name": "TE1",
+      "is_active": true,
+      "created_at": "2025-07-26T06:43:58+09:00",
+      "pricing_plan": "monthly_flat_fee",
+      "pricing_plan_name": "월정액",
+      "fee_rate": "0.00",
+      "settlement_day": 6,
+      "domain": {
+        "full_domain": "secure-bb5d6f.snappay.online",
+        "has_domain": true
+      }
+    },
+    "unsettled": {
+      "amount": 0,
+      "last_updated": "2025-07-26T06:43:58+09:00"
+    },
+    "total": {
+      "amount": 0,
+      "count": 0,
+      "fee": 0
+    },
+    "this_month": {
+      "amount": 0,
+      "count": 0,
+      "fee": 0
+    },
+    "today": {
+      "amount": 0,
+      "count": 0,
+      "fee": 0,
+      "pending_count": 0
+    },
+    "recent_transactions": [
+      {
+        "id": 238,
+        "amount": "500000.00",
+        "depositor_name": "김민",
+        "status": "expired",
+        "created_at": "2025-07-26T01:06:52+09:00",
+        "completed_at": null
+      },
+      {
+        "id": 44,
+        "amount": "10000.00",
+        "depositor_name": "김민",
+        "status": "expired",
+        "created_at": "2025-07-23T22:13:17+09:00",
+        "completed_at": null
+      },
+      {
+        "id": 43,
+        "amount": "3000.00",
+        "depositor_name": "다음",
+        "status": "expired",
+        "created_at": "2025-07-23T22:07:59+09:00",
+        "completed_at": null
+      },
+      {
+        "id": 42,
+        "amount": "30000.00",
+        "depositor_name": "김민",
+        "status": "expired",
+        "created_at": "2025-07-23T22:07:23+09:00",
+        "completed_at": null
+      },
+      {
+        "id": 41,
+        "amount": "500000.00",
+        "depositor_name": "김민",
+        "status": "expired",
+        "created_at": "2025-07-23T21:56:38+09:00",
+        "completed_at": null
+      }
+    ],
+    "updated_at": "2025-07-26T06:43:58+09:00"
+  }
+}

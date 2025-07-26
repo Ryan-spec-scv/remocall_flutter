@@ -12,6 +12,7 @@ import 'package:remocall_flutter/utils/theme.dart';
 import 'package:remocall_flutter/utils/datetime_utils.dart';
 import 'package:remocall_flutter/config/app_config.dart';
 import 'package:intl/intl.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class ShopProfileScreen extends StatefulWidget {
   const ShopProfileScreen({super.key});
@@ -25,7 +26,7 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
   final currencyFormatter = NumberFormat.currency(locale: 'ko_KR', symbol: '₩');
   bool _isLoading = true;
   Map<String, dynamic>? _shopData;
-  Timer? _refreshTimer;
+  // Timer? _refreshTimer; // 자동 갱신 제거됨
   final UpdateService _updateService = UpdateService();
   bool _isCheckingUpdate = false;
   final GlobalKey _updateButtonKey = GlobalKey();
@@ -35,12 +36,14 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
   bool _isServiceRunning = false;
   bool _isPowerSaveMode = false;
   Timer? _statusTimer;
+  String _appVersion = '';
   
   @override
   void initState() {
     super.initState();
     _loadShopProfileInitial();
     _startAutoRefresh();
+    _loadAppVersion();
     if (Platform.isAndroid) {
       _checkPermissionsAndStatus();  // Android에서만 권한 체크
     }
@@ -65,9 +68,28 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
     });
   }
   
+  Future<void> _loadAppVersion() async {
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          _appVersion = packageInfo.version;
+        });
+      }
+    } catch (e) {
+      print('Error loading app version: $e');
+      // 폴백으로 하드코딩된 버전 사용
+      if (mounted) {
+        setState(() {
+          _appVersion = AppConfig.appVersion;
+        });
+      }
+    }
+  }
+  
   @override
   void dispose() {
-    _refreshTimer?.cancel();
+    // _refreshTimer?.cancel(); // 자동 갱신 제거됨
     super.dispose();
   }
   
@@ -118,11 +140,7 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
   }
   
   void _startAutoRefresh() {
-    _refreshTimer = Timer.periodic(AppConfig.refreshInterval, (timer) {
-      if (mounted) {
-        _loadShopProfileBackground();
-      }
-    });
+    // 자동 갱신 제거 - 수동 새로고침만 사용
   }
   
   Future<void> _loadShopProfileInitial() async {
@@ -374,67 +392,67 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
                     ),
                   ],
                   
-                  const SizedBox(height: 20),
+                  // const SizedBox(height: 20),
                   
-                  // 테마 설정
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardTheme.color,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? Colors.black.withOpacity(0.3)
-                              : Colors.grey.withOpacity(0.1),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '디스플레이 설정',
-                          style: AppTheme.headlineSmall,
-                        ),
-                        const SizedBox(height: 16),
-                        Consumer<ThemeProvider>(
-                          builder: (context, themeProvider, child) {
-                            return Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    Icon(
-                                      themeProvider.isDarkMode
-                                          ? Icons.dark_mode
-                                          : Icons.light_mode,
-                                      color: AppTheme.primaryColor,
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Text(
-                                      '다크 모드',
-                                      style: AppTheme.bodyLarge,
-                                    ),
-                                  ],
-                                ),
-                                Switch(
-                                  value: themeProvider.isDarkMode,
-                                  onChanged: (value) {
-                                    themeProvider.toggleTheme();
-                                  },
-                                  activeColor: AppTheme.primaryColor,
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
+                  // // 테마 설정
+                  // Container(
+                  //   width: double.infinity,
+                  //   padding: const EdgeInsets.all(20),
+                  //   decoration: BoxDecoration(
+                  //     color: Theme.of(context).cardTheme.color,
+                  //     borderRadius: BorderRadius.circular(16),
+                  //     boxShadow: [
+                  //       BoxShadow(
+                  //         color: Theme.of(context).brightness == Brightness.dark
+                  //             ? Colors.black.withOpacity(0.3)
+                  //             : Colors.grey.withOpacity(0.1),
+                  //         blurRadius: 10,
+                  //         offset: const Offset(0, 4),
+                  //       ),
+                  //     ],
+                  //   ),
+                  //   child: Column(
+                  //     crossAxisAlignment: CrossAxisAlignment.start,
+                  //     children: [
+                  //       Text(
+                  //         '디스플레이 설정',
+                  //         style: AppTheme.headlineSmall,
+                  //       ),
+                  //       const SizedBox(height: 16),
+                  //       Consumer<ThemeProvider>(
+                  //         builder: (context, themeProvider, child) {
+                  //           return Row(
+                  //             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  //             children: [
+                  //               Row(
+                  //                 children: [
+                  //                   Icon(
+                  //                     themeProvider.isDarkMode
+                  //                         ? Icons.dark_mode
+                  //                         : Icons.light_mode,
+                  //                     color: AppTheme.primaryColor,
+                  //                   ),
+                  //                   const SizedBox(width: 12),
+                  //                   Text(
+                  //                     '다크 모드',
+                  //                     style: AppTheme.bodyLarge,
+                  //                   ),
+                  //                 ],
+                  //               ),
+                  //               Switch(
+                  //                 value: themeProvider.isDarkMode,
+                  //                 onChanged: (value) {
+                  //                   themeProvider.toggleTheme();
+                  //                 },
+                  //                 activeColor: AppTheme.primaryColor,
+                  //               ),
+                  //             ],
+                  //           );
+                  //         },
+                  //       ),
+                  //     ],
+                  //   ),
+                  // ),
                   
                   // 권한 및 상태 정보 (Android에서만 표시)
                   if (Platform.isAndroid) ...[
@@ -484,7 +502,29 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
                   ),
                   ],
                   
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 20),
+                  
+                  // 앱 정보 섹션
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardTheme.color,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.black.withOpacity(0.3)
+                              : Colors.grey.withOpacity(0.1),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: _buildInfoRow('현재 버전', _appVersion.isEmpty ? '로딩 중...' : 'v$_appVersion'),
+                  ),
+                  
+                  const SizedBox(height: 20),
                   
                   // 업데이트 버튼
                   SizedBox(
@@ -495,7 +535,7 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
                       onPressed: _isCheckingUpdate ? null : _checkAndUpdate,
                       icon: const Icon(Icons.system_update),
                       label: const Text(
-                        '업데이트',
+                        '업데이트 확인',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,

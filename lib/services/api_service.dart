@@ -31,6 +31,12 @@ class ApiService {
   // 매장 로그인 (PIN 방식)
   Future<Map<String, dynamic>> shopLogin(String shopCode, String pin) async {
     try {
+      print('[API Service] Login attempt:');
+      print('  - Base URL: ${_dio.options.baseUrl}');
+      print('  - Shop Code: $shopCode');
+      print('  - PIN: $pin');
+      print('  - PIN length: ${pin.length}');
+      
       final response = await _dio.post(
         '/api/shop/auth/login',
         data: {
@@ -39,8 +45,11 @@ class ApiService {
           'skipAuth': true,
         },
       );
+      
+      print('[API Service] Login response: ${response.data}');
       return response.data;
     } on DioException catch (e) {
+      print('[API Service] Login error: ${e.response?.data}');
       return _handleError(e);
     }
   }
@@ -111,8 +120,10 @@ class ApiService {
         'status': status ?? 'completed',
       };
       
-      if (startDate != null) queryParams['startDate'] = startDate;
-      if (endDate != null) queryParams['endDate'] = endDate;
+      if (startDate != null) queryParams['start_date'] = startDate;
+      if (endDate != null) queryParams['end_date'] = endDate;
+      
+      print('[API Service] getTransactions queryParams: $queryParams');
       
       final response = await _dio.get(
         '/api/shop/data/transactions',
@@ -252,6 +263,7 @@ class ApiService {
   // 카카오페이 알림 전송
   Future<Map<String, dynamic>> sendKakaoNotification({
     required Map<String, dynamic> notificationData,
+    String? token,
   }) async {
     try {
       // BaseURL을 임시로 변경
@@ -261,7 +273,7 @@ class ApiService {
         receiveTimeout: AppConfig.receiveTimeout,
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': 'KkP_Wh_9Qm7@L8xN3vR5tY1uE4wS6aD2fG7hJ9kM8nB5cX1zV4qP0oI3uY6tR9eW2sA7dF',
+          if (token != null) 'Authorization': 'Bearer $token',
         },
       ));
       

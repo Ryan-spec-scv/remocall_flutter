@@ -51,39 +51,13 @@ class _SplashScreenState extends State<SplashScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(30),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 20,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(30),
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Image.asset(
-                      'assets/images/logo.png',
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
-              )
-                  .animate()
-                  .fadeIn(duration: 600.ms)
-                  .scale(delay: 200.ms, duration: 400.ms),
-              const SizedBox(height: 24),
               Text(
                 'SnapPay',
-                style: AppTheme.headlineLarge.copyWith(
+                style: TextStyle(
+                  fontSize: 48,
+                  fontWeight: FontWeight.bold,
                   color: Colors.white,
+                  letterSpacing: 1.5,
                 ),
               )
                   .animate()

@@ -24,6 +24,9 @@ import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import android.app.NotificationChannel
+import android.app.PendingIntent
+import androidx.core.app.NotificationCompat
 
 class MainActivity : FlutterActivity() {
     
@@ -75,10 +78,17 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "sendTestWebhook" -> {
-                    // 테스트용 웹훅 직접 호출
+                    // 테스트용 알림 생성 (서버 전송은 NotificationService가 처리)
                     val message = call.argument<String>("message") ?: "테스트 메시지"
-                    sendTestNotificationToServer(message)
-                    result.success(true)
+                    
+                    // 로컬 알림만 생성
+                    createTestNotification(message)
+                    
+                    // Flutter에 성공 응답 즉시 반환
+                    result.success(mapOf(
+                        "success" to true,
+                        "message" to "테스트 알림이 생성되었습니다"
+                    ))
                 }
                 "isKakaoPayNotificationEnabled" -> {
                     result.success(isKakaoPayNotificationEnabled())
@@ -412,84 +422,108 @@ class MainActivity : FlutterActivity() {
         }
     }
     
-    private fun sendTestNotificationToServer(message: String) {
+    private fun createTestNotification(message: String) {
+        try {
+            // 알림 채널 생성 (Android O 이상)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channelId = "snappay_test_notifications"
+                val channelName = "SnapPay 테스트 알림"
+                val importance = NotificationManager.IMPORTANCE_HIGH
+                val channel = NotificationChannel(channelId, channelName, importance).apply {
+                    description = "테스트 알림을 표시합니다"
+                    enableLights(true)
+                    enableVibration(true)
+                }
+                
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.createNotificationChannel(channel)
+            }
+            
+            // 알림 생성
+            val notificationIntent = Intent(this, MainActivity::class.java)
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                notificationIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            
+            val notification = NotificationCompat.Builder(this, "snappay_test_notifications")
+                .setContentTitle("SnapPay")
+                .setContentText(message)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setContentIntent(pendingIntent)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+                .build()
+            
+            val notificationManager = NotificationManagerCompat.from(this)
+            // 알림 ID는 현재 시간 기반으로 생성하여 중복 방지
+            val notificationId = System.currentTimeMillis().toInt()
+            
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                notificationManager.notify(notificationId, notification)
+                Log.d(TAG, "Test notification created: $message")
+            } else {
+                Log.w(TAG, "POST_NOTIFICATIONS permission not granted")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating test notification", e)
+        }
+    }
+    
+    private fun sendTestNotificationToServer(message: String, result: MethodChannel.Result) {
         GlobalScope.launch(Dispatchers.IO) {
             try {
                 Log.d(TAG, "=== SEND TEST WEBHOOK START ===")
                 
-                // SharedPreferences에서 액세스 토큰과 shop_code 가져오기
+                // SharedPreferences에서 액세스 토큰 가져오기
                 val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                 val accessToken = prefs.getString("flutter.access_token", null)
-                val shopCode = prefs.getString("flutter.shop_code", null)
                 
                 Log.d(TAG, "Access token exists: ${accessToken != null}")
-                Log.d(TAG, "Shop code: $shopCode")
                 
-                if (shopCode == null) {
-                    Log.w(TAG, "No shop code found, cannot send test notification")
+                if (accessToken == null) {
+                    Log.w(TAG, "No access token found, cannot send test notification")
+                    result.success(mapOf(
+                        "success" to false,
+                        "message" to "인증 토큰이 필요합니다"
+                    ))
                     return@launch
                 }
                 
-                // API 호출을 위한 데이터 준비
-                val notificationData = JSONObject().apply {
-                    put("message", message)
-                    put("shop_code", shopCode)
-                }
-                
-                Log.d(TAG, "Sending test data: $notificationData")
-                
-                // HTTP 요청 직접 수행
-                val url = URL("https://admin-api.snappay.online/api/kakao-deposits/webhook")
-                val connection = url.openConnection() as HttpURLConnection
-                
-                try {
-                    connection.requestMethod = "POST"
-                    connection.setRequestProperty("Content-Type", "application/json")
-                    connection.setRequestProperty("X-API-Key", "KkP_Wh_9Qm7@L8xN3vR5tY1uE4wS6aD2fG7hJ9kM8nB5cX1zV4qP0oI3uY6tR9eW2sA7dF")
-                    if (accessToken != null) {
-                        connection.setRequestProperty("Authorization", "Bearer $accessToken")
-                        Log.d(TAG, "Authorization header added")
+                // 공통 함수 사용 (KST 타임스탬프 자동 적용)
+                NotificationService.sendNotificationToServer(
+                    context = this@MainActivity,
+                    message = message,
+                    accessToken = accessToken,
+                    onResult = { success, responseMessage ->
+                        // 파싱된 응답으로 Flutter에 결과 전달
+                        result.success(mapOf(
+                            "success" to success,
+                            "message" to responseMessage,
+                            "matchStatus" to when {
+                                responseMessage.contains("매칭되어 거래가 완료") -> "matched"
+                                responseMessage.contains("새 거래를 자동으로 생성") -> "auto_created"
+                                responseMessage.contains("이미 처리된") -> "duplicate"
+                                responseMessage.contains("실패") -> "failed"
+                                else -> "unknown"
+                            }
+                        ))
                     }
-                    connection.connectTimeout = 10000
-                    connection.readTimeout = 10000
-                    connection.doOutput = true
-                    connection.doInput = true
-                    connection.useCaches = false
-                    
-                    Log.d(TAG, "Sending POST request to: $url")
-                    
-                    connection.outputStream.use { os ->
-                        val input = notificationData.toString().toByteArray(charset("utf-8"))
-                        os.write(input, 0, input.size)
-                    }
-                    
-                    val responseCode = connection.responseCode
-                    Log.d(TAG, "Server response code: $responseCode")
-                    
-                    if (responseCode == 200 || responseCode == 201) {
-                        val response = connection.inputStream.bufferedReader().use { it.readText() }
-                        Log.d(TAG, "✅ Test notification sent to server successfully")
-                        Log.d(TAG, "Server response: $response")
-                    } else {
-                        val errorStream = connection.errorStream
-                        val response = if (errorStream != null) {
-                            errorStream.bufferedReader().use { it.readText() }
-                        } else {
-                            "No error response"
-                        }
-                        Log.e(TAG, "❌ Server error ($responseCode): $response")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Connection error: ${e.message}", e)
-                } finally {
-                    connection.disconnect()
-                }
+                )
                 
                 Log.d(TAG, "=== SEND TEST WEBHOOK END ===")
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending test webhook: ${e.message}", e)
                 e.printStackTrace()
+                result.success(mapOf(
+                    "success" to false,
+                    "message" to "전송 오류: ${e.message}"
+                ))
             }
         }
     }

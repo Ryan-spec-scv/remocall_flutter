@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:remocall_flutter/models/user.dart';
 import 'package:remocall_flutter/models/shop.dart';
 import 'package:remocall_flutter/services/api_service.dart';
+import 'package:remocall_flutter/config/app_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -58,6 +59,7 @@ class AuthProvider extends ChangeNotifier {
         await prefs.setString('shop_code', shopCode);
         await prefs.setString('shop_name', _currentShop!.name);
         await prefs.setInt('shop_id', _currentShop!.id);
+        await prefs.setBool('is_production', AppConfig.isProduction);
         
         _setLoading(false);
         

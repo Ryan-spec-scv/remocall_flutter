@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:remocall_flutter/models/transaction_model.dart';
 import 'package:remocall_flutter/providers/auth_provider.dart';
-import 'package:remocall_flutter/providers/transaction_provider.dart';
 import 'package:remocall_flutter/services/api_service.dart';
 import 'package:remocall_flutter/utils/theme.dart';
 import 'package:remocall_flutter/utils/datetime_utils.dart';
@@ -33,24 +32,22 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   List<TransactionModel> _transactions = [];
   
   bool _isLoadingMore = false;
-  Timer? _refreshTimer;
+  // Timer? _refreshTimer; // 자동 갱신 제거됨
   
   @override
   void initState() {
     super.initState();
+    print('[TransactionsScreen] initState called');
     _selectedStatus = TransactionStatus.completed; // 기본값을 '완료'로 설정
     _updateDateRangeForPeriod();
     _loadTransactions();
     
-    // 15초마다 자동 갱신 (API 부하 방지)
-    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
-      _loadTransactionsBackground();
-    });
+    // 자동 갱신 제거 - 수동 새로고침만 사용
   }
   
   @override
   void dispose() {
-    _refreshTimer?.cancel();
+    // _refreshTimer?.cancel(); // 자동 갱신 제거됨
     super.dispose();
   }
   
@@ -65,6 +62,14 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       
       try {
         final apiService = ApiService();
+        
+        print('[TransactionsScreen] Loading transactions with filters:');
+        print('  - page: ${page ?? _currentPage}');
+        print('  - status: ${_selectedStatus?.toString().split('.').last}');
+        print('  - startDate: ${_startDate != null ? dateFormatter.format(_startDate!) : null}');
+        print('  - endDate: ${_endDate != null ? dateFormatter.format(_endDate!) : null}');
+        print('  - selectedPeriod: $_selectedPeriod');
+        
         final response = await apiService.getTransactions(
           token: authProvider.accessToken!,
           page: page ?? _currentPage,
@@ -78,6 +83,17 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           final data = response['data'] ?? {};
           final transactionsData = data['transactions'] as List<dynamic>? ?? [];
           final pagination = data['pagination'] ?? {};
+          
+          print('[TransactionsScreen] API Response - transactions count: ${transactionsData.length}');
+          print('[TransactionsScreen] Pagination info: ${pagination}');
+          print('[TransactionsScreen] - current_page: ${pagination['current_page']}');
+          print('[TransactionsScreen] - total_pages: ${pagination['total_pages']}');
+          print('[TransactionsScreen] - total_items: ${pagination['total_items']}');
+          print('[TransactionsScreen] - items_per_page: ${pagination['items_per_page']}');
+          if (transactionsData.isNotEmpty) {
+            print('[TransactionsScreen] First transaction date: ${transactionsData[0]['created_at']}');
+            print('[TransactionsScreen] Last transaction date: ${transactionsData[transactionsData.length - 1]['created_at']}');
+          }
           
           setState(() {
             // Convert API transactions to our model
@@ -115,6 +131,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
               );
             }).toList();
             
+            // 페이지네이션 정보 업데이트 (서버 응답 사용)
             _currentPage = pagination['current_page'] ?? 1;
             _totalPages = pagination['total_pages'] ?? 1;
             _isLoadingMore = false;
@@ -130,6 +147,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   }
   
   Future<void> _loadTransactionsBackground() async {
+    // 백그라운드 갱신 시에도 현재 필터 유지
     await _loadTransactions(page: _currentPage);
   }
   
@@ -168,6 +186,10 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     );
     
     if (picked != null) {
+      print('[TransactionsScreen] Custom date range selected:');
+      print('  - start: ${dateFormatter.format(picked.start)}');
+      print('  - end: ${dateFormatter.format(picked.end)}');
+      
       setState(() {
         _startDate = picked.start;
         _endDate = picked.end;
@@ -214,6 +236,10 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
         _endDate = null;
         break;
     }
+    
+    print('[TransactionsScreen] Period: $_selectedPeriod');
+    print('[TransactionsScreen] StartDate: ${_startDate != null ? dateFormatter.format(_startDate!) : "null"}');
+    print('[TransactionsScreen] EndDate: ${_endDate != null ? dateFormatter.format(_endDate!) : "null"}');
   }
   
   void _onPeriodChanged(String period) {
@@ -257,17 +283,18 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // 기간 선택 탭
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
+                Container(
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   child: Row(
                     children: [
-                      _buildPeriodChip('all', '전체'),
-                      const SizedBox(width: 8),
-                      _buildPeriodChip('month', '이번 달'),
-                      const SizedBox(width: 8),
-                      _buildPeriodChip('week', '이번 주'),
-                      const SizedBox(width: 8),
-                      _buildPeriodChip('today', '오늘'),
+                      _buildPeriodTab('all', '전체'),
+                      _buildPeriodTab('month', '이번 달'),
+                      _buildPeriodTab('week', '이번 주'),
+                      _buildPeriodTab('today', '오늘'),
                     ],
                   ),
                 ),
@@ -322,8 +349,8 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           
           // 거래 목록
           Expanded(
-              child: Consumer<TransactionProvider>(
-                builder: (context, provider, child) {
+              child: Builder(
+                builder: (context) {
                   if (_isLoadingMore && _transactions.isEmpty) {
                     return const Center(
                       child: CircularProgressIndicator(),
@@ -354,6 +381,10 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                   
                   return RefreshIndicator(
                     onRefresh: () => _loadTransactions(page: 1),
+                    displacement: 100,
+                    backgroundColor: AppTheme.primaryColor,
+                    color: Colors.white,
+                    strokeWidth: 4,
                     child: ListView(
                       children: [
                         // 헤더
@@ -474,7 +505,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                       ],
                     ),
                   );
-                },
+                }
               ),
             ),
           ],
@@ -592,6 +623,33 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
       labelStyle: TextStyle(
         color: isSelected ? AppTheme.primaryColor : Theme.of(context).textTheme.bodyMedium?.color,
         fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+      ),
+    );
+  }
+  
+  Widget _buildPeriodTab(String period, String label) {
+    final isSelected = _selectedPeriod == period;
+    
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => _onPeriodChanged(period),
+        child: Container(
+          margin: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: isSelected ? AppTheme.primaryColor : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? Colors.white : Theme.of(context).textTheme.bodyMedium?.color,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

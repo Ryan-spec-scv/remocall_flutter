@@ -31,8 +31,125 @@ class NotificationService : NotificationListenerService() {
         private const val CHANNEL = "com.remocall/notifications"
         private const val KAKAO_TALK_PACKAGE = "com.kakao.talk"
         private const val KAKAO_PAY_PACKAGE = "com.kakaopay.app"
+        private const val SNAPPAY_PACKAGE = "com.remocall.remocall_flutter"
         private const val NOTIFICATION_CHANNEL_ID = "depositpro_notification_listener"
         private const val NOTIFICATION_ID = 1001
+        
+        // 타임스탬프 생성 함수 (UTC 기준)
+        fun getKSTTimestamp(): Long {
+            // 현재 시간의 밀리초를 그대로 반환 (UTC 기준)
+            return System.currentTimeMillis()
+        }
+        
+        // 공통 서버 전송 함수
+        fun sendNotificationToServer(
+            context: Context,
+            message: String,
+            accessToken: String,
+            onResult: (Boolean, String) -> Unit
+        ) {
+            try {
+                Log.d(TAG, "=== SEND NOTIFICATION TO SERVER (Common) ===")
+                
+                // API 호출을 위한 데이터 준비 (KST 타임스탬프 사용)
+                val notificationData = JSONObject().apply {
+                    put("message", message)
+                    put("timestamp", getKSTTimestamp())
+                }
+                
+                Log.d(TAG, "Sending data: $notificationData")
+                
+                // SharedPreferences에서 API URL 가져오기 (개발/프로덕션 구분)
+                val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                val isProduction = prefs.getBoolean("flutter.is_production", true)
+                val apiUrl = if (isProduction) {
+                    "https://admin-api.snappay.online/api/kakao-deposits/webhook"
+                } else {
+                    "https://kakaopay-admin-api.flexteam.kr/api/kakao-deposits/webhook"
+                }
+                
+                Log.d(TAG, "Using API URL: $apiUrl (isProduction: $isProduction)")
+                
+                // HTTP 요청 직접 수행
+                val url = java.net.URL(apiUrl)
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                
+                try {
+                    connection.requestMethod = "POST"
+                    connection.setRequestProperty("Content-Type", "application/json")
+                    connection.setRequestProperty("Authorization", "Bearer $accessToken")
+                    connection.connectTimeout = 10000
+                    connection.readTimeout = 10000
+                    connection.doOutput = true
+                    connection.doInput = true
+                    connection.useCaches = false
+                    
+                    Log.d(TAG, "Sending POST request to: $url")
+                    
+                    connection.outputStream.use { os ->
+                        val input = notificationData.toString().toByteArray(charset("utf-8"))
+                        os.write(input, 0, input.size)
+                    }
+                    
+                    val responseCode = connection.responseCode
+                    Log.d(TAG, "Server response code: $responseCode")
+                    
+                    if (responseCode == 200 || responseCode == 201) {
+                        val response = connection.inputStream.bufferedReader().use { it.readText() }
+                        Log.d(TAG, "✅ Notification sent to server successfully")
+                        Log.d(TAG, "Server response: $response")
+                        
+                        // 응답 파싱
+                        try {
+                            val jsonResponse = JSONObject(response)
+                            val success = jsonResponse.getBoolean("success")
+                            val data = jsonResponse.getJSONObject("data")
+                            val matchStatus = data.getString("match_status")
+                            
+                            val responseMessage = when (matchStatus) {
+                                "matched" -> "✅ 입금이 자동으로 매칭되어 거래가 완료되었습니다."
+                                "auto_created" -> "✅ 매칭되는 거래가 없어 새 거래를 자동으로 생성했습니다."
+                                "duplicate" -> "ℹ️ 이미 처리된 입금입니다."
+                                "failed" -> "❌ 자동 거래 생성에 실패했습니다. 수동 확인이 필요합니다."
+                                else -> "서버 응답: $matchStatus"
+                            }
+                            
+                            onResult(success && matchStatus != "failed", responseMessage)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing response: ${e.message}")
+                            onResult(true, "서버 응답 파싱 오류: ${e.message}")
+                        }
+                    } else {
+                        val errorStream = connection.errorStream
+                        val response = if (errorStream != null) {
+                            errorStream.bufferedReader().use { it.readText() }
+                        } else {
+                            "No error response"
+                        }
+                        Log.e(TAG, "❌ Server error ($responseCode): $response")
+                        
+                        // 에러 메시지 파싱 시도
+                        var errorMessage = "서버 오류 ($responseCode)"
+                        try {
+                            val jsonError = JSONObject(response)
+                            errorMessage = jsonError.getString("message")
+                        } catch (e: Exception) {
+                            errorMessage = "서버 오류 ($responseCode): $response"
+                        }
+                        
+                        onResult(false, errorMessage)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Connection error: ${e.message}", e)
+                    onResult(false, "네트워크 오류: ${e.message}")
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in sendNotificationToServer: ${e.message}", e)
+                onResult(false, "전송 오류: ${e.message}")
+            }
+        }
     }
     
     private var methodChannel: MethodChannel? = null
@@ -149,13 +266,26 @@ class NotificationService : NotificationListenerService() {
         
         Log.d(TAG, "Notification received from: ${sbn.packageName}")
         
-        // 카카오페이 알림만 처리
-        if (sbn.packageName != KAKAO_PAY_PACKAGE) {
-            Log.d(TAG, "Not KakaoPay, skipping...")
-            return
-        }
+        // SharedPreferences에서 알림 인식 모드 확인
+        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val isSnapPayMode = prefs.getBoolean("flutter.is_snappay_mode", false)
         
-        Log.d(TAG, "Processing KakaoPay notification")
+        // 모드에 따라 다른 패키지 처리
+        if (isSnapPayMode) {
+            // 스냅페이 모드: SnapPay 알림만 처리
+            if (sbn.packageName != SNAPPAY_PACKAGE) {
+                Log.d(TAG, "Not SnapPay, skipping...")
+                return
+            }
+            Log.d(TAG, "Processing SnapPay notification")
+        } else {
+            // 카카오페이 모드: 카카오페이 알림만 처리
+            if (sbn.packageName != KAKAO_PAY_PACKAGE) {
+                Log.d(TAG, "Not KakaoPay, skipping...")
+                return
+            }
+            Log.d(TAG, "Processing KakaoPay notification")
+        }
         
         try {
             val notification = sbn.notification
@@ -338,101 +468,72 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
+    // 입금 알림인지 확인하는 함수
+    private fun isDepositNotification(message: String): Boolean {
+        // 입금 패턴: "이름(마스킹)님이 금액원을 보냈어요"
+        val depositPattern = Regex(".*\\(.*\\*.*\\)님이\\s+[0-9,]+원을\\s+보냈어요\\.?")
+        
+        // 제외할 패턴들 (송금, 이체 등)
+        val excludePatterns = listOf(
+            "송금했어요",
+            "이체했어요",
+            "계좌로",
+            "출금",
+            "결제",
+            "환불",
+            "취소"
+        )
+        
+        // 입금 패턴과 일치하고, 제외 패턴이 없을 때만 true
+        val isDeposit = message.matches(depositPattern) && 
+                       excludePatterns.none { message.contains(it) }
+        
+        Log.d(TAG, "Message: $message")
+        Log.d(TAG, "Is deposit notification: $isDeposit")
+        
+        return isDeposit
+    }
+    
     private fun sendToServer(message: String, parsedData: Map<String, String>) {
         scope.launch(Dispatchers.IO) {
             try {
                 Log.d(TAG, "=== SEND TO SERVER START (NotificationService) ===")
                 
-                // SharedPreferences에서 액세스 토큰과 shop_code 가져오기
-                val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                val accessToken = prefs.getString("flutter.access_token", null)
-                val shopCode = prefs.getString("flutter.shop_code", null)
-                
-                Log.d(TAG, "Access token exists: ${accessToken != null}")
-                Log.d(TAG, "Shop code: $shopCode")
-                
-                if (accessToken == null) {
-                    Log.w(TAG, "No access token found, sending without authentication")
-                    // 액세스 토큰이 없어도 API Key로 전송 시도
-                }
-                
-                if (shopCode == null) {
-                    Log.w(TAG, "No shop code found, cannot send notification")
+                // 입금 알림이 아니면 서버로 전송하지 않음
+                if (!isDepositNotification(message)) {
+                    Log.d(TAG, "Not a deposit notification, skipping server send")
                     return@launch
                 }
                 
-                // API 호출을 위한 데이터 준비
-                val notificationData = JSONObject().apply {
-                    put("message", message)
-                    put("shop_code", shopCode)
+                // SharedPreferences에서 액세스 토큰 가져오기
+                val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                val accessToken = prefs.getString("flutter.access_token", null)
+                
+                Log.d(TAG, "Access token exists: ${accessToken != null}")
+                
+                if (accessToken == null) {
+                    Log.w(TAG, "No access token found, cannot send notification")
+                    return@launch
                 }
                 
-                Log.d(TAG, "Sending data: $notificationData")
-                
-                // HTTP 요청 직접 수행
-                val url = java.net.URL("https://admin-api.snappay.online/api/kakao-deposits/webhook")
-                val connection = url.openConnection() as java.net.HttpURLConnection
-                
-                try {
-                    connection.requestMethod = "POST"
-                    connection.setRequestProperty("Content-Type", "application/json")
-                    connection.setRequestProperty("X-API-Key", "KkP_Wh_9Qm7@L8xN3vR5tY1uE4wS6aD2fG7hJ9kM8nB5cX1zV4qP0oI3uY6tR9eW2sA7dF")
-                    if (accessToken != null) {
-                        connection.setRequestProperty("Authorization", "Bearer $accessToken")
-                        Log.d(TAG, "Authorization header added")
-                    }
-                    connection.connectTimeout = 10000
-                    connection.readTimeout = 10000
-                    connection.doOutput = true
-                    connection.doInput = true
-                    connection.useCaches = false
-                    
-                    Log.d(TAG, "Sending POST request to: $url")
-                    
-                    connection.outputStream.use { os ->
-                        val input = notificationData.toString().toByteArray(charset("utf-8"))
-                        os.write(input, 0, input.size)
-                    }
-                    
-                    val responseCode = connection.responseCode
-                    Log.d(TAG, "Server response code: $responseCode")
-                    
-                    if (responseCode == 200 || responseCode == 201) {
-                        val response = connection.inputStream.bufferedReader().use { it.readText() }
-                        Log.d(TAG, "✅ Notification sent to server successfully")
-                        Log.d(TAG, "Server response: $response")
-                    } else {
-                        val errorStream = connection.errorStream
-                        val response = if (errorStream != null) {
-                            errorStream.bufferedReader().use { it.readText() }
-                        } else {
-                            "No error response"
+                // 공통 함수 사용
+                NotificationService.sendNotificationToServer(
+                    context = this@NotificationService,
+                    message = message,
+                    accessToken = accessToken,
+                    onResult = { success, responseMessage ->
+                        if (!success || responseMessage.contains("failed")) {
+                            // 실패 시 재시도 큐에 추가
+                            val failedNotification = FailedNotification(
+                                message = message,
+                                shopCode = "",  // shop_code 더 이상 사용하지 않음
+                                timestamp = NotificationService.getKSTTimestamp()
+                            )
+                            saveFailedNotification(failedNotification)
+                            Log.w(TAG, "Added to retry queue")
                         }
-                        Log.e(TAG, "❌ Server error ($responseCode): $response")
-                        
-                        // 실패 시 큐에 추가
-                        val failedNotification = FailedNotification(
-                            message = message,
-                            shopCode = shopCode,
-                            timestamp = System.currentTimeMillis()
-                        )
-                        saveFailedNotification(failedNotification)
-                        Log.w(TAG, "Added to retry queue due to server error: $responseCode")
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Connection error: ${e.message}", e)
-                    
-                    // 네트워크 오류 등으로 실패 시 큐에 추가
-                    val failedNotification = FailedNotification(
-                        message = message,
-                        shopCode = shopCode,
-                        timestamp = System.currentTimeMillis()
-                    )
-                    saveFailedNotification(failedNotification)
-                    Log.w(TAG, "Added to retry queue due to exception: ${e.message}")
-                } finally {
-                    connection.disconnect()
-                }
+                )
                 
                 Log.d(TAG, "=== SEND TO SERVER END ===")
                 
@@ -548,26 +649,10 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
-    // 재시도 가능 여부 확인
+    // 재시도 가능 여부 확인 - 제한 없이 항상 재시도
     private fun shouldRetry(notification: FailedNotification): Boolean {
-        val maxRetries = 5
-        val maxAge = 24 * 60 * 60 * 1000L // 24시간
-        
-        // 최대 재시도 횟수 초과
-        if (notification.retryCount >= maxRetries) {
-            Log.w(TAG, "Max retries exceeded for notification ${notification.id}")
-            removeFromQueue(notification.id)
-            return false
-        }
-        
-        // 24시간 경과
-        if (System.currentTimeMillis() - notification.createdAt > maxAge) {
-            Log.w(TAG, "Notification ${notification.id} expired (24h)")
-            removeFromQueue(notification.id)
-            return false
-        }
-        
-        // 백오프 전략 제거 - 항상 재시도 가능
+        // 제한 없이 계속 재시도
+        Log.d(TAG, "Notification ${notification.id} will be retried (attempt ${notification.retryCount + 1})")
         return true
     }
     
@@ -606,49 +691,33 @@ class NotificationService : NotificationListenerService() {
             val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val accessToken = prefs.getString("flutter.access_token", null)
             
-            val notificationData = JSONObject().apply {
-                put("message", notification.message)
-                put("shop_code", notification.shopCode)
+            if (accessToken == null) {
+                Log.w(TAG, "No access token for retry, skipping notification ${notification.id}")
+                removeFromQueue(notification.id)
+                return
             }
             
-            val url = URL("https://admin-api.snappay.online/api/kakao-deposits/webhook")
-            val connection = url.openConnection() as HttpURLConnection
-            
-            try {
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.setRequestProperty("X-API-Key", "KkP_Wh_9Qm7@L8xN3vR5tY1uE4wS6aD2fG7hJ9kM8nB5cX1zV4qP0oI3uY6tR9eW2sA7dF")
-                if (accessToken != null) {
-                    connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            // 공통 함수 사용 (이미 저장된 timestamp 사용)
+            NotificationService.sendNotificationToServer(
+                context = this@NotificationService,
+                message = notification.message,
+                accessToken = accessToken,
+                onResult = { success, responseMessage ->
+                    if (!success || responseMessage.contains("실패")) {
+                        Log.e(TAG, "❌ Retry failed: $responseMessage")
+                        // 재시도 카운트 증가하여 다시 저장
+                        val updatedNotification = notification.copy(
+                            retryCount = notification.retryCount + 1,
+                            lastRetryTime = System.currentTimeMillis()
+                        )
+                        updateNotificationInQueue(updatedNotification)
+                    } else {
+                        // 성공 또는 중복인 경우 큐에서 제거
+                        Log.d(TAG, "✅ Retry successful for notification ${notification.id}: $responseMessage")
+                        removeFromQueue(notification.id)
+                    }
                 }
-                connection.connectTimeout = 10000
-                connection.readTimeout = 10000
-                connection.doOutput = true
-                connection.doInput = true
-                connection.useCaches = false
-                
-                connection.outputStream.use { os ->
-                    val input = notificationData.toString().toByteArray(charset("utf-8"))
-                    os.write(input, 0, input.size)
-                }
-                
-                val responseCode = connection.responseCode
-                
-                if (responseCode == 200 || responseCode == 201) {
-                    Log.d(TAG, "✅ Retry successful for notification ${notification.id}")
-                    removeFromQueue(notification.id)
-                } else {
-                    Log.e(TAG, "❌ Retry failed with code $responseCode")
-                    // 재시도 카운트 증가하여 다시 저장
-                    val updatedNotification = notification.copy(
-                        retryCount = notification.retryCount + 1,
-                        lastRetryTime = System.currentTimeMillis()
-                    )
-                    updateNotificationInQueue(updatedNotification)
-                }
-            } finally {
-                connection.disconnect()
-            }
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Retry error: ${e.message}", e)
             // 재시도 카운트 증가하여 다시 저장

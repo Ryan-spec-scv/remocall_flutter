@@ -14,10 +14,12 @@ class NotificationProvider extends ChangeNotifier {
   String? _error;
   String? _accessToken;
   String? _shopCode;
+  bool _isSnapPayMode = false;
 
   List<NotificationModel> get notifications => List.unmodifiable(_notifications);
   bool get isLoading => _isLoading;
   String? get error => _error;
+  bool get isSnapPayMode => _isSnapPayMode;
 
   NotificationProvider() {
     _initializeServices();
@@ -31,6 +33,7 @@ class NotificationProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _accessToken = prefs.getString('access_token');
     _shopCode = prefs.getString('shop_code');
+    _isSnapPayMode = prefs.getBool('is_snappay_mode') ?? false;
   }
 
   Future<void> loadNotifications() async {
@@ -127,16 +130,17 @@ class NotificationProvider extends ChangeNotifier {
       print('Message: ${notification.message}');
       print('ParsedData: ${notification.parsedData}');
       
-      // 카카오페이 메시지 형식으로 전송 (message와 shop_code 함께 전송)
+      // 카카오페이 메시지 형식으로 전송 (message와 timestamp만 전송)
       final notificationData = {
         'message': notification.message,
-        'shop_code': _shopCode ?? '',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
       };
       
       print('Sending data: $notificationData');
       
       final response = await _apiService.sendKakaoNotification(
         notificationData: notificationData,
+        token: _accessToken,
       );
       
       print('Server response: $response');
@@ -209,6 +213,30 @@ class NotificationProvider extends ChangeNotifier {
   // Update shop code when user logs in
   void updateShopCode(String? shopCode) {
     _shopCode = shopCode;
+  }
+  
+  // Toggle notification mode between KakaoPay and SnapPay
+  Future<void> toggleNotificationMode() async {
+    _isSnapPayMode = !_isSnapPayMode;
+    
+    // Save to SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_snappay_mode', _isSnapPayMode);
+    
+    print('Notification mode changed to: ${_isSnapPayMode ? "SnapPay" : "KakaoPay"}');
+    notifyListeners();
+  }
+  
+  // Set notification mode explicitly
+  Future<void> setNotificationMode(bool isSnapPayMode) async {
+    _isSnapPayMode = isSnapPayMode;
+    
+    // Save to SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_snappay_mode', _isSnapPayMode);
+    
+    print('Notification mode set to: ${_isSnapPayMode ? "SnapPay" : "KakaoPay"}');
+    notifyListeners();
   }
 
   void _setLoading(bool value) {

@@ -27,7 +27,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   static const platform = MethodChannel('com.remocall/notifications');
   bool _hasNotificationAccess = false;
-  Timer? _refreshTimer;
+  // Timer? _refreshTimer; // 자동 갱신 제거됨
   bool _isFirstLoad = true;
   final UpdateService _updateService = UpdateService();
   bool _hasCheckedUpdate = false;
@@ -42,15 +42,12 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadDataInitial();
     _checkForUpdate(); // 업데이트 체크 추가
     
-    // 15초마다 데이터 자동 갱신 (API 부하 방지)
-    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
-      _loadDataBackground();
-    });
+    // 자동 갱신 제거 - 수동 새로고침만 사용
   }
   
   @override
   void dispose() {
-    _refreshTimer?.cancel();
+    // _refreshTimer?.cancel(); // 자동 갱신 제거됨
     super.dispose();
   }
   
@@ -133,10 +130,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final transactionProvider = Provider.of<TransactionProvider>(context, listen: false);
     
     if (authProvider.accessToken != null) {
-      await Future.wait([
-        transactionProvider.loadTransactions(authProvider.accessToken!, refresh: true),
-        transactionProvider.loadDashboard(authProvider.accessToken!),
-      ]);
+      // initial API만 호출 (recent_transactions 포함)
+      await transactionProvider.loadDashboard(authProvider.accessToken!);
     }
     _isFirstLoad = false;
   }
@@ -147,11 +142,8 @@ class _HomeScreenState extends State<HomeScreen> {
     
     if (authProvider.accessToken != null) {
       print('[HomeScreen] Background refresh started...');
-      // 백그라운드에서는 가벼운 realtime API 사용
-      await Future.wait([
-        transactionProvider.loadTransactions(authProvider.accessToken!, refresh: false),
-        transactionProvider.loadRealtimeData(authProvider.accessToken!),
-      ]);
+      // 백그라운드에서는 realtime API만 사용
+      await transactionProvider.loadRealtimeData(authProvider.accessToken!);
       print('[HomeScreen] Background refresh completed');
     }
   }
@@ -163,7 +155,6 @@ class _HomeScreenState extends State<HomeScreen> {
     
     return Scaffold(
       body: _buildHomeTab(),
-      // 플로팅 버튼 숨김 처리
       // floatingActionButton: FloatingActionButton(
       //   onPressed: () {
       //     Navigator.push(
@@ -188,6 +179,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return SafeArea(
       child: RefreshIndicator(
         onRefresh: _loadDataInitial,
+        displacement: 100,
+        backgroundColor: AppTheme.primaryColor,
+        color: Colors.white,
+        strokeWidth: 4,
         child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
@@ -218,12 +213,24 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                           child: Row(
                             children: [
-                              Text(
-                                shop?.name ?? '매장',
-                                style: AppTheme.bodyMedium.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.grey[700],
-                                ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    shop?.name ?? '매장',
+                                    style: AppTheme.bodyMedium.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                                  Text(
+                                    '(${shop?.code ?? '0000'})',
+                                    style: AppTheme.bodySmall.copyWith(
+                                      color: Colors.grey[600],
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
                               ),
                               const SizedBox(width: 8),
                               Container(
@@ -423,10 +430,8 @@ class _HomeScreenState extends State<HomeScreen> {
             // Transaction List
             Consumer<TransactionProvider>(
               builder: (context, provider, child) {
-                final recentTransactions = provider.transactions
-                    .where((transaction) => transaction.status == TransactionStatus.completed)
-                    .take(10)
-                    .toList();
+                // initial API의 recent_transactions 사용
+                final recentTransactions = provider.recentTransactions;
                 
                 if (provider.isLoading && recentTransactions.isEmpty) {
                   return const SliverFillRemaining(
@@ -815,8 +820,13 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Center(
-                  child: CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+                  child: SizedBox(
+                    width: 50,
+                    height: 50,
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+                      strokeWidth: 4,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),

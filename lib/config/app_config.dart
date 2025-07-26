@@ -4,14 +4,15 @@ class AppConfig {
   static const String apiBaseUrlDev = 'https://kakaopay-admin-api.flexteam.kr'; // 개발용
   
   // 현재 환경 (true: 프로덕션, false: 개발)
-  static const bool isProduction = true;
+  // 빌드 시 --dart-define=IS_PRODUCTION=true/false로 설정
+  static const bool isProduction = bool.fromEnvironment('IS_PRODUCTION', defaultValue: true);
   
   // 실제 사용할 API URL
   static String get baseUrl => isProduction ? apiBaseUrl : apiBaseUrlDev;
   
   // 앱 정보
   static const String appName = '리모콜';
-  static const String appVersion = '1.0.0';
+  static const String appVersion = '1.0.28';
   
   // 타임아웃 설정
   static const Duration connectionTimeout = Duration(seconds: 10);

@@ -20,7 +20,7 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
   static const platform = MethodChannel('com.remocall/notifications');
   bool _isServiceRunning = false;
   bool _hasPermission = false;
-  Timer? _statusTimer;
+  // Timer? _statusTimer; // 자동 갱신 제거됨
   final TextEditingController _testMessageController = TextEditingController();
 
   @override
@@ -31,15 +31,13 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
     // 기본 테스트 메시지 설정
     _testMessageController.text = '이현우(이*우)님이 10,000원을 보냈어요.';
     
-    // 5초마다 상태 갱신 (알림 테스트 화면은 더 자주)
-    _statusTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      _checkStatus();
-    });
+    // 자동 갱신 제거 - 수동 새로고침만 사용
+    _checkStatus(); // 초기 상태만 확인
   }
   
   @override
   void dispose() {
-    _statusTimer?.cancel();
+    // _statusTimer?.cancel(); // 자동 갱신 제거됨
     _testMessageController.dispose();
     super.dispose();
   }
@@ -73,40 +71,25 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
     }
     
     try {
-      // Native 코드에서 직접 서버로 웹훅 전송
-      await platform.invokeMethod('sendTestWebhook', {
+      // Native 코드에서 테스트 알림만 생성 (서버 전송은 NotificationService가 처리)
+      final result = await platform.invokeMethod('sendTestWebhook', {
         'message': testMessage,
       });
       
-      // 메시지에서 금액과 보낸 사람 파싱 시도 (UI 표시용)
-      final amountMatch = RegExp(r'([\d,]+)원').firstMatch(testMessage);
-      final senderMatch = RegExp(r'([가-힣a-zA-Z0-9]+)(?:\([가-힣a-zA-Z0-9*]+\))?님이').firstMatch(testMessage);
+      // 알림 생성 결과 처리
+      final success = result['success'] as bool;
+      final responseMessage = result['message'] as String;
       
-      final amount = amountMatch?.group(1)?.replaceAll(',', '') ?? '0';
-      final sender = senderMatch?.group(1) ?? '알 수 없음';
-      
-      final testData = {
-        'packageName': 'com.kakaopay.app',
-        'sender': '송금이 완료되었어요',
-        'message': testMessage,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'parsedData': {
-          'type': 'income',
-          'amount': amount,
-          'from': sender,
-          'rawText': testMessage,
-        }
-      };
-
-      // Flutter UI에도 표시
-      platform.invokeMethod('onNotificationReceived', jsonEncode(testData));
-      
+      // 테스트 알림 생성 성공 메시지 표시
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('테스트 웹훅을 서버로 전송했습니다. 로그를 확인하세요.'),
-          backgroundColor: AppTheme.successColor,
+        SnackBar(
+          content: Text(responseMessage),
+          backgroundColor: success ? AppTheme.successColor : Colors.red,
         ),
       );
+      
+      // 알림이 NotificationService에 의해 감지되고 서버로 전송될 것임
+      print('Test notification created, waiting for NotificationService to detect and send...');
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -122,6 +105,7 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
     final notificationProvider = Provider.of<NotificationProvider>(context);
     final transactionProvider = Provider.of<TransactionProvider>(context);
     final notifications = notificationProvider.notifications;
+    final provider = notificationProvider; // for easier access
     // dateFormatter removed - will use DateTimeUtils directly
 
     return Scaffold(
@@ -143,6 +127,60 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
                 _buildStatusRow('알림 접근 권한', _hasPermission),
                 const SizedBox(height: 8),
                 _buildStatusRow('NotificationListener 실행 중', _isServiceRunning),
+                const SizedBox(height: 8),
+                // 모드 전환 스위치 추가
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: provider.isSnapPayMode ? Colors.blue.withOpacity(0.1) : Colors.green.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '알림 인식 모드',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                          Text(
+                            provider.isSnapPayMode 
+                                ? 'SnapPay 알림만 인식합니다' 
+                                : '카카오페이 알림만 인식합니다',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: provider.isSnapPayMode ? Colors.blue : Colors.green,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          Text(
+                            provider.isSnapPayMode ? 'SnapPay' : 'KakaoPay',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: provider.isSnapPayMode ? Colors.blue : Colors.green,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Switch(
+                            value: provider.isSnapPayMode,
+                            onChanged: (value) async {
+                              await provider.setNotificationMode(value);
+                            },
+                            activeColor: Colors.blue,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 16),
                 // 테스트 메시지 입력 필드
                 TextField(

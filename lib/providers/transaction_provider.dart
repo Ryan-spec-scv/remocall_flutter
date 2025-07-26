@@ -18,8 +18,11 @@ class TransactionProvider extends ChangeNotifier {
   // Dashboard data
   Map<String, dynamic>? _dashboardData;
   
+  // Recent transactions from initial API (for home screen)
+  List<TransactionModel> _recentTransactions = [];
   
   List<TransactionModel> get transactions => List.unmodifiable(_transactions);
+  List<TransactionModel> get recentTransactions => List.unmodifiable(_recentTransactions);
   double get balance => _balance;
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -261,6 +264,43 @@ class TransactionProvider extends ChangeNotifier {
           _balance = (unsettledAmount as num).toDouble();
           print('Balance updated: $_balance');
         }
+        
+        // recent_transactions 처리 (메인화면용)
+        final recentTransactionsData = data['recent_transactions'] as List<dynamic>? ?? [];
+        _recentTransactions = recentTransactionsData.map((transaction) {
+          TransactionStatus status;
+          switch (transaction['status']) {
+            case 'pending':
+            case 'scanned':
+            case 'payment_waiting':
+              status = TransactionStatus.pending;
+              break;
+            case 'failed':
+            case 'expired':
+              status = TransactionStatus.failed;
+              break;
+            case 'cancelled':
+              status = TransactionStatus.cancelled;
+              break;
+            case 'completed':
+            default:
+              status = TransactionStatus.completed;
+          }
+          
+          return TransactionModel(
+            id: transaction['id'].toString(),
+            type: TransactionType.income,
+            amount: double.parse(transaction['amount'] ?? '0'),
+            description: transaction['qr_code'] ?? '',
+            sender: transaction['depositor_name'] ?? '알 수 없음',
+            category: 'payment',
+            createdAt: DateTimeUtils.parseToKST(transaction['created_at']),
+            status: status,
+            account: 'KakaoPay QR',
+          );
+        }).toList();
+        
+        print('Recent transactions updated: ${_recentTransactions.length} items');
         
         print('Calling notifyListeners()');
         notifyListeners();
