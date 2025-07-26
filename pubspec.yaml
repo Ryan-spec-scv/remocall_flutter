@@ -1,13 +1,13 @@
 name: remocall_flutter
 description: DepositPro - 스마트 입금 관리 시스템
 publish_to: 'none'
-version: 1.0.26+26
+version: 1.0.28+28
 
 # 앱 메타데이터
 app_info:
-  version_name: "1.0.26"
-  changelog: "Windows 플랫폼 지원 추가 및 크로스 플랫폼 빌드"
-  version_date: "2025-07-25"
+  version_name: "1.0.28"
+  changelog: "UI 개선 및 프로덕션 배포"
+  version_date: "2025-07-26"
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -37,7 +37,7 @@ dependencies:
   shared_preferences: ^2.2.2
   
   # Utilities
-  intl: ^0.20.2
+  intl: ^0.19.0
   uuid: ^4.2.1
   permission_handler: ^11.1.0
   url_launcher: ^6.2.2
