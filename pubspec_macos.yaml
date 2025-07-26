@@ -1,0 +1,60 @@
+name: remocall_flutter
+description: DepositPro - 스마트 입금 관리 시스템
+publish_to: 'none'
+version: 1.0.28+28
+
+# 앱 메타데이터
+app_info:
+  version_name: "1.0.28"
+  changelog: "macOS 버전 빌드"
+  version_date: "2025-01-26"
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  
+  # UI
+  cupertino_icons: ^1.0.6
+  google_fonts: ^6.1.0
+  flutter_animate: ^4.3.0
+  
+  # State Management
+  provider: ^6.1.1
+  
+  # Network
+  dio: ^5.4.0
+  http: ^1.1.0
+  connectivity_plus: ^5.0.2
+  
+  # Local Storage
+  sqflite: ^2.3.0
+  path_provider: ^2.1.1
+  shared_preferences: ^2.2.2
+  
+  # Utilities
+  intl: ^0.19.0
+  uuid: ^4.2.1
+  url_launcher: ^6.2.2
+  package_info_plus: ^8.0.0
+  
+  # Image
+  image_picker: ^1.0.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/release-metadata.json
+    - CHANGELOG.md
+    - pubspec.yaml

@@ -1,0 +1,76 @@
+name: macOS Only Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    name: Build macOS App
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.27.3'
+        channel: 'stable'
+    
+    - name: Enable macOS desktop
+      run: flutter config --enable-macos-desktop
+    
+    - name: Use macOS-specific pubspec
+      run: |
+        cp pubspec_macos.yaml pubspec.yaml
+    
+    - name: Create macOS project files
+      run: |
+        rm -rf macos
+        flutter create --platforms=macos .
+    
+    - name: Update app name in macOS project
+      run: |
+        # Update CFBundleName and CFBundleDisplayName in Info.plist
+        /usr/libexec/PlistBuddy -c "Set :CFBundleName SnapPay" macos/Runner/Info.plist
+        /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName SnapPay" macos/Runner/Info.plist
+        
+        # Update project name in AppInfo.xcconfig
+        sed -i '' 's/PRODUCT_NAME = remocall_flutter/PRODUCT_NAME = SnapPay/g' macos/Runner/Configs/AppInfo.xcconfig
+    
+    - name: Install dependencies
+      run: flutter pub get
+    
+    - name: Build macOS app
+      run: flutter build macos --release --no-codesign
+    
+    - name: List build output
+      run: |
+        echo "Build output contents:"
+        ls -la build/macos/Build/Products/Release/
+    
+    - name: Create DMG installer
+      run: |
+        # Create a temporary directory for DMG contents
+        mkdir -p dmg_temp
+        cp -R build/macos/Build/Products/Release/*.app dmg_temp/
+        
+        # Create DMG
+        hdiutil create -volname "SnapPay" -srcfolder dmg_temp -ov -format UDZO SnapPay-macOS.dmg
+        
+        # Clean up
+        rm -rf dmg_temp
+    
+    - name: Upload macOS App
+      uses: actions/upload-artifact@v4
+      with:
+        name: SnapPay-macOS-App-${{ github.run_number }}
+        path: build/macos/Build/Products/Release/*.app
+        retention-days: 30
+    
+    - name: Upload macOS DMG
+      uses: actions/upload-artifact@v4
+      with:
+        name: SnapPay-macOS-DMG-${{ github.run_number }}
+        path: SnapPay-macOS.dmg
+        retention-days: 30
