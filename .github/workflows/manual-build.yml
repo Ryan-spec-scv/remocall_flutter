@@ -46,38 +46,40 @@ jobs:
         path: SnapPay-Windows-${{ github.run_number }}.zip
         retention-days: 30
 
-  # macOS 빌드는 open_file 패키지가 macOS를 지원하지 않아 일시 비활성화
-  # build-macos:
-  #   name: Build macOS
-  #   runs-on: macos-latest
-  #   
-  #   steps:
-  #   - uses: actions/checkout@v4
-  #   
-  #   - name: Setup Flutter
-  #     uses: subosito/flutter-action@v2
-  #     with:
-  #       flutter-version: '3.27.3'
-  #       channel: 'stable'
-  #   
-  #   - name: Enable macOS desktop
-  #     run: flutter config --enable-macos-desktop
-  #   
-  #   - name: Get dependencies
-  #     run: flutter pub get
-  #   
-  #   - name: Build macOS
-  #     run: flutter build macos --release
-  #   
-  #   - name: Create Release Archive
-  #     run: |
-  #       mkdir -p SnapPay-macOS
-  #       cp -R build/macos/Build/Products/Release/SnapPay.app SnapPay-macOS/
-  #       zip -r SnapPay-macOS-${{ github.run_number }}.zip SnapPay-macOS/
-  #   
-  #   - name: Upload macOS Build
-  #     uses: actions/upload-artifact@v4
-  #     with:
-  #       name: SnapPay-macOS-Build-${{ github.run_number }}
-  #       path: SnapPay-macOS-${{ github.run_number }}.zip
-  #       retention-days: 30
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.27.3'
+        channel: 'stable'
+    
+    - name: Enable macOS desktop
+      run: flutter config --enable-macos-desktop
+    
+    - name: Create macOS project files
+      run: flutter create --platforms=macos .
+    
+    - name: Get dependencies
+      run: flutter pub get
+    
+    - name: Build macOS
+      run: flutter build macos --release
+    
+    - name: Create Release Archive
+      run: |
+        mkdir -p SnapPay-macOS
+        cp -R build/macos/Build/Products/Release/SnapPay.app SnapPay-macOS/
+        zip -r SnapPay-macOS-${{ github.run_number }}.zip SnapPay-macOS/
+    
+    - name: Upload macOS Build
+      uses: actions/upload-artifact@v4
+      with:
+        name: SnapPay-macOS-Build-${{ github.run_number }}
+        path: SnapPay-macOS-${{ github.run_number }}.zip
+        retention-days: 30
