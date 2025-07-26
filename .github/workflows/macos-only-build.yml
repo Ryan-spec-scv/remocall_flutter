@@ -31,12 +31,17 @@ jobs:
     
     - name: Update app name in macOS project
       run: |
-        # Update CFBundleName and CFBundleDisplayName in Info.plist
+        # Update CFBundleName in Info.plist
         /usr/libexec/PlistBuddy -c "Set :CFBundleName SnapPay" macos/Runner/Info.plist
-        /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName SnapPay" macos/Runner/Info.plist
+        
+        # Add CFBundleDisplayName if it doesn't exist
+        /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string SnapPay" macos/Runner/Info.plist || /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName SnapPay" macos/Runner/Info.plist
         
         # Update project name in AppInfo.xcconfig
         sed -i '' 's/PRODUCT_NAME = remocall_flutter/PRODUCT_NAME = SnapPay/g' macos/Runner/Configs/AppInfo.xcconfig
+        
+        # Also update the bundle identifier if needed
+        sed -i '' 's/com.example.remocallFlutter/com.snappay.app/g' macos/Runner/Configs/AppInfo.xcconfig
     
     - name: Install dependencies
       run: flutter pub get
