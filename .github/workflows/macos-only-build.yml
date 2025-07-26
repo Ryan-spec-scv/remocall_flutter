@@ -20,9 +20,115 @@ jobs:
     - name: Enable macOS desktop
       run: flutter config --enable-macos-desktop
     
-    - name: Use macOS-specific pubspec
+    - name: Prepare macOS build environment
       run: |
+        # Backup original files
+        cp pubspec.yaml pubspec_original.yaml
+        cp lib/main.dart lib/main_original.dart
+        
+        # Use macOS-specific pubspec
         cp pubspec_macos.yaml pubspec.yaml
+        
+        # Create a macOS-compatible main.dart
+        cat > lib/main.dart << 'EOF'
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:provider/provider.dart';
+import 'package:remocall_flutter/providers/auth_provider.dart';
+import 'package:remocall_flutter/providers/notification_provider.dart';
+import 'package:remocall_flutter/providers/transaction_provider.dart';
+import 'package:remocall_flutter/providers/theme_provider.dart';
+import 'package:remocall_flutter/screens/splash_screen.dart';
+import 'package:remocall_flutter/services/connectivity_service.dart';
+import 'package:remocall_flutter/services/notification_service.dart';
+import 'package:remocall_flutter/utils/theme.dart';
+import 'package:remocall_flutter/widgets/app_initializer.dart';
+import 'package:remocall_flutter/widgets/connectivity_wrapper.dart';
+import 'dart:io';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:remocall_flutter/config/app_config.dart';
+
+// 빌드 시 설정된 프로덕션 모드를 SharedPreferences에 저장
+Future<void> _saveProductionMode() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setBool('is_production', AppConfig.isProduction);
+  print('[SnapPay] Production mode saved: ${AppConfig.isProduction}');
+}
+
+void main() async {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    // macOS에서 디버그 메시지
+    if (Platform.isMacOS) {
+      print('[SnapPay] Starting macOS application...');
+    }
+    
+    // 빌드 시 설정된 isProduction 값을 SharedPreferences에 저장
+    await _saveProductionMode();
+
+    // Initialize connectivity service
+    final connectivityService = ConnectivityService();
+    await connectivityService.initialize();
+
+    // Initialize theme provider
+    final themeProvider = ThemeProvider();
+    await themeProvider.loadThemePreference();
+
+    // Notification service for connectivity monitoring
+    final notificationService = NotificationService();
+
+    runApp(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => AuthProvider()),
+          ChangeNotifierProvider(create: (_) => TransactionProvider()),
+          ChangeNotifierProvider(create: (_) => NotificationProvider()),
+          ChangeNotifierProvider.value(value: themeProvider),
+          Provider.value(value: connectivityService),
+          Provider.value(value: notificationService),
+        ],
+        child: const MyApp(),
+      ),
+    );
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    
+    return MaterialApp(
+      title: AppConfig.appName,
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: themeProvider.themeMode,
+      locale: const Locale('ko', 'KR'),
+      supportedLocales: const [
+        Locale('ko', 'KR'),
+        Locale('en', 'US'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: const ConnectivityWrapper(
+        child: AppInitializer(
+          child: SplashScreen(),
+        ),
+      ),
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
+EOF
+        
+        # Remove platform-specific service files
+        rm -f lib/services/update_service.dart
+        rm -f lib/services/apk_update_service.dart
     
     - name: Create macOS project files
       run: |

@@ -12,7 +12,9 @@ import 'package:remocall_flutter/services/notification_service.dart';
 import 'package:remocall_flutter/utils/theme.dart';
 import 'package:remocall_flutter/widgets/app_initializer.dart';
 import 'package:remocall_flutter/widgets/connectivity_wrapper.dart';
-import 'package:workmanager/workmanager.dart';
+// Conditional import for workmanager
+import 'package:workmanager/workmanager.dart'
+    if (dart.library.html) 'main_stub.dart';
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:remocall_flutter/config/app_config.dart';
@@ -20,11 +22,13 @@ import 'package:remocall_flutter/config/app_config.dart';
 // WorkManager callback
 @pragma('vm:entry-point')
 void callbackDispatcher() {
-  Workmanager().executeTask((task, inputData) async {
-    // Handle background sync
-    print("Background task executed: $task");
-    return Future.value(true);
-  });
+  if (Platform.isAndroid) {
+    Workmanager().executeTask((task, inputData) async {
+      // Handle background sync
+      print("Background task executed: $task");
+      return Future.value(true);
+    });
+  }
 }
 
 // 빌드 시 설정된 프로덕션 모드를 SharedPreferences에 저장
