@@ -13,6 +13,7 @@ import 'package:remocall_flutter/utils/datetime_utils.dart';
 import 'package:remocall_flutter/config/app_config.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:remocall_flutter/screens/settings/settings_screen.dart';
 
 class ShopProfileScreen extends StatefulWidget {
   const ShopProfileScreen({super.key});
@@ -502,53 +503,56 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
                   ),
                   ],
                   
-                  const SizedBox(height: 20),
-                  
-                  // 앱 정보 섹션
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardTheme.color,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? Colors.black.withOpacity(0.3)
-                              : Colors.grey.withOpacity(0.1),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
+                  // 앱 버전 정보 및 업데이트 (모바일에서만 표시)
+                  if (!Platform.isWindows && !Platform.isMacOS) ...[
+                    const SizedBox(height: 20),
+                    
+                    // 앱 정보 섹션
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).cardTheme.color,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? Colors.black.withOpacity(0.3)
+                                : Colors.grey.withOpacity(0.1),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: _buildInfoRow('현재 버전', _appVersion.isEmpty ? '로딩 중...' : 'v$_appVersion'),
                     ),
-                    child: _buildInfoRow('현재 버전', _appVersion.isEmpty ? '로딩 중...' : 'v$_appVersion'),
-                  ),
-                  
-                  const SizedBox(height: 20),
-                  
-                  // 업데이트 버튼
-                  SizedBox(
-                    key: _updateButtonKey,
-                    width: double.infinity,
-                    height: 56,
-                    child: ElevatedButton.icon(
-                      onPressed: _isCheckingUpdate ? null : _checkAndUpdate,
-                      icon: const Icon(Icons.system_update),
-                      label: const Text(
-                        '업데이트 확인',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
+                    
+                    const SizedBox(height: 20),
+                    
+                    // 업데이트 버튼
+                    SizedBox(
+                      key: _updateButtonKey,
+                      width: double.infinity,
+                      height: 56,
+                      child: ElevatedButton.icon(
+                        onPressed: _isCheckingUpdate ? null : _checkAndUpdate,
+                        icon: const Icon(Icons.system_update),
+                        label: const Text(
+                          '업데이트 확인',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryColor,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                       ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryColor,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
                     ),
-                  ),
+                  ],
                   
                   const SizedBox(height: 16),
                   
