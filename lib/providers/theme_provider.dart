@@ -40,4 +40,9 @@ class ThemeProvider extends ChangeNotifier {
     
     notifyListeners();
   }
+  
+  // Public method for loading theme preference (alias for _loadTheme)
+  Future<void> loadThemePreference() async {
+    await _loadTheme();
+  }
 }

@@ -26,8 +26,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
-  Win32Window::Size size(1280, 720);
-  if (!window.Create(L"remocall_flutter", origin, size)) {
+  // 모바일 화면 비율 (iPhone 14 기준)
+  Win32Window::Size size(390, 844);
+  if (!window.Create(L"SnapPay", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
