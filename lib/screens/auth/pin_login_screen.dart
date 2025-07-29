@@ -38,7 +38,7 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
     
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final success = await authProvider.loginWithPin(
-      _shopCodeController.text.trim(),
+      _shopCodeController.text.trim().toUpperCase(),
       _pinController.text.trim().toUpperCase(),
     );
     
@@ -49,7 +49,7 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
     if (success) {
       // Update NotificationProvider with shop code and access token
       final notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
-      notificationProvider.updateShopCode(_shopCodeController.text.trim());
+      notificationProvider.updateShopCode(_shopCodeController.text.trim().toUpperCase());
       notificationProvider.updateAccessToken(authProvider.accessToken);
       
       if (mounted) {
@@ -136,6 +136,7 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
                     controller: _shopCodeController,
                     decoration: InputDecoration(
                       labelText: '매장 코드',
+                      hintText: '예: AB12',
                       prefixIcon: const Icon(Icons.store_outlined),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -143,9 +144,10 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
                       filled: true,
                       fillColor: isDarkMode ? const Color(0xFF2A2A2A) : Colors.grey[50],
                     ),
-                    keyboardType: TextInputType.number,
+                    keyboardType: TextInputType.text,
+                    textCapitalization: TextCapitalization.characters,
                     inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
+                      FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
                       LengthLimitingTextInputFormatter(4),
                     ],
                     validator: (value) {
@@ -154,6 +156,9 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
                       }
                       if (value.length != 4) {
                         return '매장 코드는 4자리입니다';
+                      }
+                      if (!RegExp(r'^[A-Z0-9]+$').hasMatch(value.toUpperCase())) {
+                        return '매장 코드는 영문과 숫자만 가능합니다';
                       }
                       return null;
                     },
