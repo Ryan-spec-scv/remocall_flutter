@@ -143,7 +143,8 @@ remocall_flutter/
 │       ├── LogManager.kt           # Logging system
 │       ├── GitHubUploader.kt       # Log upload to GitHub
 │       ├── GitHubSecrets.kt        # GitHub API credentials (gitignored)
-│       └── NotificationServiceWatchdog.kt # Service monitoring (10s interval)
+│       ├── NotificationServiceWatchdog.kt # Service monitoring (10s interval)
+│       └── SnapPayAccessibilityService.kt # Accessibility service for auto lockscreen unlock
 ├── ios/                            # iOS native code
 ├── macos/                          # macOS native code  
 ├── windows/                        # Windows native code
@@ -158,7 +159,7 @@ remocall_flutter/
 ### Android
 - **Notification Access**: Uses `NotificationListenerService` for KakaoTalk notification parsing
 - **Background Processing**: `WorkManager` for periodic sync tasks
-- **Permissions Required**: Notification access permission, overlay permission
+- **Permissions Required**: Notification access permission, overlay permission, accessibility service permission
 - **Native Features**: Log management, GitHub integration, notification watchdog
 - **Build Target**: API level 33+
 - **Service Stability**: 
@@ -412,5 +413,6 @@ flutter run -d <device_id>
 - **UI Improvements**: Fixed mobile pagination layout to display 4 page buttons at a time for better mobile UX
 - **Wake Screen on KakaoPay**: Simplified screen wake-up condition - now wakes screen for all KakaoPay notifications
 - **Lockscreen Dismiss**: Enhanced lockscreen dismissal with KeyguardDismissCallback and additional Intent flags
+- **Accessibility Service**: Implemented SnapPayAccessibilityService for automatic lockscreen dismissal on KakaoPay notifications
 
 This guide provides comprehensive information for Claude instances working with the SnapPay Flutter codebase. The application is a production Korean fintech app with complex notification parsing requirements and multi-platform deployment needs.
