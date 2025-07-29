@@ -1250,6 +1250,10 @@ class NotificationService : NotificationListenerService() {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                
+                // 잠금화면 해제를 위한 추가 플래그
+                addFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION)
+                addFlags(Intent.FLAG_FROM_BACKGROUND)
             }
             
             startActivity(intent)

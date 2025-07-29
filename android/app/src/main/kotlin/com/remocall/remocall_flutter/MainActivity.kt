@@ -232,7 +232,19 @@ class MainActivity : FlutterActivity() {
             setTurnScreenOn(true)
             
             val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-            keyguardManager.requestDismissKeyguard(this, null)
+            keyguardManager.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
+                override fun onDismissError() {
+                    Log.e(TAG, "Keyguard dismiss error")
+                }
+                
+                override fun onDismissSucceeded() {
+                    Log.d(TAG, "Keyguard dismissed successfully")
+                }
+                
+                override fun onDismissCancelled() {
+                    Log.d(TAG, "Keyguard dismiss cancelled")
+                }
+            })
         } else {
             @Suppress("DEPRECATION")
             window.addFlags(
