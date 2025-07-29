@@ -13,7 +13,7 @@
 
 ### App Metadata
 - **App Name**: SnapPay (리모콜)
-- **Current Version**: 1.0.39+10039
+- **Current Version**: 1.0.40+10040
 - **Package**: com.remocall.remocall_flutter
 - **Flutter SDK**: >=3.0.0 <4.0.0
 
@@ -139,10 +139,11 @@ remocall_flutter/
 ├── android/                        # Android native code
 │   └── app/src/main/kotlin/com/remocall/remocall_flutter/
 │       ├── MainActivity.kt
-│       ├── NotificationService.kt   # Core notification listener
+│       ├── NotificationService.kt   # Core notification listener (with queue system)
 │       ├── LogManager.kt           # Logging system
 │       ├── GitHubUploader.kt       # Log upload to GitHub
-│       └── NotificationServiceWatchdog.kt # Service monitoring
+│       ├── GitHubSecrets.kt        # GitHub API credentials (gitignored)
+│       └── NotificationServiceWatchdog.kt # Service monitoring (10s interval)
 ├── ios/                            # iOS native code
 ├── macos/                          # macOS native code  
 ├── windows/                        # Windows native code
@@ -160,6 +161,11 @@ remocall_flutter/
 - **Permissions Required**: Notification access permission, overlay permission
 - **Native Features**: Log management, GitHub integration, notification watchdog
 - **Build Target**: API level 33+
+- **Service Stability**: 
+  - Permanent WakeLock for maximum reliability
+  - 10-second JobScheduler check interval
+  - Notification queue system with retry mechanism
+  - ConcurrentHashMap for thread safety
 
 ### iOS  
 - **Notification Limitations**: Cannot directly access third-party notifications due to iOS restrictions
@@ -182,6 +188,7 @@ remocall_flutter/
 
 ### Authentication (AuthProvider)
 - Shop-based authentication with PIN login
+- Shop code format: 4 characters (alphanumeric, uppercase letters + numbers)
 - JWT token management with automatic refresh
 - Persistent session storage
 
@@ -394,5 +401,13 @@ flutter run -d <device_id>
 - **iOS**: Verify provisioning profiles and certificates
 - **macOS**: Ensure Xcode command line tools installed
 - **Windows**: Use Windows host machine for Windows builds
+
+## Recent Updates
+
+### Version 1.0.40 (2025-07-29)
+- **Notification Queue System**: Implemented queue-based notification sending with retry mechanism
+- **Service Stability**: Enhanced Android service reliability with permanent WakeLock and faster monitoring
+- **Shop Code Format**: Changed from numeric-only to alphanumeric (uppercase letters + numbers) 4-character format
+- **GitHub Integration**: Secure credential management with GitHubSecrets.kt
 
 This guide provides comprehensive information for Claude instances working with the SnapPay Flutter codebase. The application is a production Korean fintech app with complex notification parsing requirements and multi-platform deployment needs.
