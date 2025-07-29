@@ -411,5 +411,6 @@ flutter run -d <device_id>
 - **GitHub Integration**: Secure credential management with GitHubSecrets.kt
 - **UI Improvements**: Fixed mobile pagination layout to display 4 page buttons at a time for better mobile UX
 - **Wake Screen on KakaoPay**: Simplified screen wake-up condition - now wakes screen for all KakaoPay notifications
+- **Lockscreen Dismiss**: Enhanced lockscreen dismissal with KeyguardDismissCallback and additional Intent flags
 
 This guide provides comprehensive information for Claude instances working with the SnapPay Flutter codebase. The application is a production Korean fintech app with complex notification parsing requirements and multi-platform deployment needs.
