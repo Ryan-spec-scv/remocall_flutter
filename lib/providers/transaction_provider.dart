@@ -133,6 +133,13 @@ class TransactionProvider extends ChangeNotifier {
         }
       } else {
         _error = transactionsResponse['message'];
+        print('[TransactionProvider] API Error: ${transactionsResponse['message']}');
+        // 401 에러인 경우 로그인 화면으로
+        if (transactionsResponse['message']?.contains('토큰') == true || 
+            transactionsResponse['message']?.contains('인증') == true) {
+          // TODO: Navigate to login screen
+          print('[TransactionProvider] Token expired, need to re-login');
+        }
       }
     } catch (e) {
       _error = '데이터를 불러오는데 실패했습니다';

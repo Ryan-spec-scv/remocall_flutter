@@ -8,7 +8,7 @@ import 'package:remocall_flutter/providers/transaction_provider.dart';
 import 'package:remocall_flutter/providers/theme_provider.dart';
 import 'package:remocall_flutter/screens/splash_screen.dart';
 import 'package:remocall_flutter/services/connectivity_service.dart';
-import 'package:remocall_flutter/services/notification_service.dart';
+import 'package:remocall_flutter/services/notification_service_macos.dart';
 import 'package:remocall_flutter/utils/theme.dart';
 import 'package:remocall_flutter/widgets/app_initializer.dart';
 import 'package:remocall_flutter/widgets/connectivity_wrapper.dart';
@@ -34,8 +34,21 @@ void callbackDispatcher() {
 // 빌드 시 설정된 프로덕션 모드를 SharedPreferences에 저장
 Future<void> _saveProductionMode() async {
   final prefs = await SharedPreferences.getInstance();
-  await prefs.setBool('is_production', AppConfig.isProduction);
+  await prefs.setBool('flutter.is_production', AppConfig.isProduction);
   print('[SnapPay] Production mode saved: ${AppConfig.isProduction}');
+}
+
+// 알림 큐 정리
+Future<void> _cleanNotificationQueue() async {
+  if (Platform.isAndroid) {
+    try {
+      const platform = MethodChannel('com.remocall/notifications');
+      await platform.invokeMethod('cleanNotificationQueue');
+      print('[SnapPay] Notification queue cleaned');
+    } catch (e) {
+      print('[SnapPay] Error cleaning notification queue: $e');
+    }
+  }
 }
 
 void main() async {
@@ -48,6 +61,9 @@ void main() async {
     
     // 빌드 시 설정된 isProduction 값을 SharedPreferences에 저장
     await _saveProductionMode();
+    
+    // 알림 큐 정리 (입금 알림이 아닌 것들 제거)
+    await _cleanNotificationQueue();
 
     // Initialize connectivity service
     final connectivityService = ConnectivityService();

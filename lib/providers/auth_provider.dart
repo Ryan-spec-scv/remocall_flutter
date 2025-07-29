@@ -46,6 +46,12 @@ class AuthProvider extends ChangeNotifier {
       if (response['success']) {
         // 새로운 API 응답 형식에 맞춰 수정
         final data = response['data'];
+        
+        // 응답 구조 디버깅
+        print('[AuthProvider] Login response data structure:');
+        print('  - Has tokens key: ${data.containsKey('tokens')}');
+        print('  - Tokens: ${data['tokens']}');
+        
         _accessToken = data['tokens']['access_token'];
         _refreshToken = data['tokens']['refresh_token'];
         
@@ -56,6 +62,9 @@ class AuthProvider extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('access_token', _accessToken!);
         await prefs.setString('refresh_token', _refreshToken!);
+        // NotificationService\uc5d0\uc11c \uc0ac\uc6a9\ud558\ub294 \ud0a4\ub85c\ub3c4 \uc800\uc7a5
+        await prefs.setString('flutter.access_token', _accessToken!);
+        await prefs.setString('flutter.refresh_token', _refreshToken!);
         await prefs.setString('shop_code', shopCode);
         await prefs.setString('shop_name', _currentShop!.name);
         await prefs.setInt('shop_id', _currentShop!.id);
@@ -94,6 +103,9 @@ class AuthProvider extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('access_token', _accessToken!);
         await prefs.setString('refresh_token', _refreshToken!);
+        // NotificationService\uc5d0\uc11c \uc0ac\uc6a9\ud558\ub294 \ud0a4\ub85c\ub3c4 \uc800\uc7a5
+        await prefs.setString('flutter.access_token', _accessToken!);
+        await prefs.setString('flutter.refresh_token', _refreshToken!);
         
         return true;
       }
@@ -132,6 +144,8 @@ class AuthProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('access_token');
     await prefs.remove('refresh_token');
+    await prefs.remove('flutter.access_token');
+    await prefs.remove('flutter.refresh_token');
     await prefs.remove('shop_code');
     await prefs.remove('shop_name');
     await prefs.remove('shop_id');

@@ -33,7 +33,7 @@ class NotificationProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _accessToken = prefs.getString('access_token');
     _shopCode = prefs.getString('shop_code');
-    _isSnapPayMode = prefs.getBool('is_snappay_mode') ?? false;
+    _isSnapPayMode = prefs.getBool('flutter.is_snappay_mode') ?? false;
   }
 
   Future<void> loadNotifications() async {
@@ -221,7 +221,7 @@ class NotificationProvider extends ChangeNotifier {
     
     // Save to SharedPreferences
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('is_snappay_mode', _isSnapPayMode);
+    await prefs.setBool('flutter.is_snappay_mode', _isSnapPayMode);
     
     print('Notification mode changed to: ${_isSnapPayMode ? "SnapPay" : "KakaoPay"}');
     notifyListeners();
@@ -233,7 +233,7 @@ class NotificationProvider extends ChangeNotifier {
     
     // Save to SharedPreferences
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('is_snappay_mode', _isSnapPayMode);
+    await prefs.setBool('flutter.is_snappay_mode', _isSnapPayMode);
     
     print('Notification mode set to: ${_isSnapPayMode ? "SnapPay" : "KakaoPay"}');
     notifyListeners();

@@ -1,0 +1,257 @@
+package com.remocall.remocall_flutter
+
+import android.content.Context
+import android.util.Log
+import com.google.api.client.http.javanet.NetHttpTransport
+import com.google.api.client.json.gson.GsonFactory
+import com.google.api.services.drive.Drive
+import com.google.api.services.drive.model.File as DriveFile
+import com.google.api.services.drive.model.FileList
+import com.google.auth.http.HttpCredentialsAdapter
+import com.google.auth.oauth2.GoogleCredentials
+import com.google.api.client.http.FileContent
+import java.io.File
+import java.io.InputStream
+import java.util.Collections
+
+class GoogleDriveUploader(private val context: Context) {
+    
+    companion object {
+        private const val TAG = "GoogleDriveUploader"
+        private const val APPLICATION_NAME = "SnapPay Log Uploader"
+        private const val PARENT_FOLDER_NAME = "SnapPay Logs"
+        private const val SERVICE_ACCOUNT_FILE = "google_drive_service_account.json"
+    }
+    
+    private var driveService: Drive? = null
+    private var parentFolderId: String? = null
+    
+    init {
+        initializeDriveService()
+    }
+    
+    private fun initializeDriveService() {
+        try {
+            Log.d(TAG, "Initializing Google Drive service...")
+            
+            // assets 폴더의 파일 목록 확인
+            try {
+                val assetFiles = context.assets.list("")
+                Log.d(TAG, "Files in assets folder: ${assetFiles?.joinToString(", ") ?: "none"}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error listing assets", e)
+            }
+            
+            // assets 폴더에서 서비스 계정 키 파일 읽기
+            Log.d(TAG, "Opening service account file: $SERVICE_ACCOUNT_FILE")
+            val credentialsStream: InputStream = context.assets.open(SERVICE_ACCOUNT_FILE)
+            
+            // GoogleCredentials 생성
+            Log.d(TAG, "Creating GoogleCredentials...")
+            val credentials = GoogleCredentials.fromStream(credentialsStream)
+                .createScoped(listOf(
+                    "https://www.googleapis.com/auth/drive",
+                    "https://www.googleapis.com/auth/drive.file"
+                ))
+            
+            // Drive 서비스 초기화
+            Log.d(TAG, "Building Drive service...")
+            // Android에서는 NetHttpTransport를 직접 사용
+            val httpTransport = NetHttpTransport()
+            val jsonFactory = GsonFactory.getDefaultInstance()
+            
+            driveService = Drive.Builder(httpTransport, jsonFactory, HttpCredentialsAdapter(credentials))
+                .setApplicationName(APPLICATION_NAME)
+                .build()
+            
+            Log.d(TAG, "✅ Google Drive service initialized successfully")
+            
+            // 부모 폴더 ID는 나중에 찾기 (업로드 시점에)
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to initialize Google Drive service", e)
+            e.printStackTrace()
+        }
+    }
+    
+    private fun findParentFolder() {
+        try {
+            Log.d(TAG, "Searching for shared parent folder: $PARENT_FOLDER_NAME")
+            // 공유된 폴더 찾기 - 소유자 조건 제거
+            val query = "name='$PARENT_FOLDER_NAME' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+            Log.d(TAG, "Query: $query")
+            
+            val result: FileList = driveService?.files()?.list()
+                ?.setQ(query)
+                ?.setSpaces("drive")
+                ?.setFields("files(id, name, owners, capabilities)")
+                ?.execute() ?: run {
+                    Log.e(TAG, "Drive service is null or query failed")
+                    return
+                }
+            
+            val files = result.files
+            Log.d(TAG, "Found ${files?.size ?: 0} folders matching query")
+            
+            if (files != null && files.isNotEmpty()) {
+                // 첫 번째 폴더 사용 (공유된 폴더)
+                val folder = files[0]
+                parentFolderId = folder.id
+                Log.d(TAG, "✅ Found shared parent folder: $PARENT_FOLDER_NAME (ID: $parentFolderId)")
+                
+                // 권한 확인
+                val capabilities = folder.capabilities
+                if (capabilities != null) {
+                    Log.d(TAG, "Folder capabilities - canAddChildren: ${capabilities.canAddChildren}")
+                }
+            } else {
+                Log.e(TAG, "❌ Shared parent folder not found: $PARENT_FOLDER_NAME")
+                Log.e(TAG, "Make sure the folder is shared with the service account email")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error finding parent folder", e)
+            e.printStackTrace()
+        }
+    }
+    
+    private fun createParentFolder() {
+        try {
+            val folderMetadata = DriveFile().apply {
+                name = PARENT_FOLDER_NAME
+                mimeType = "application/vnd.google-apps.folder"
+            }
+            
+            val folder = driveService?.files()?.create(folderMetadata)
+                ?.setFields("id")
+                ?.execute()
+            
+            if (folder != null) {
+                parentFolderId = folder.id
+                Log.d(TAG, "✅ Created parent folder: $PARENT_FOLDER_NAME (ID: $parentFolderId)")
+            } else {
+                Log.e(TAG, "❌ Failed to create parent folder")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error creating parent folder", e)
+            e.printStackTrace()
+        }
+    }
+    
+    fun uploadFile(file: File, shopCode: String): Boolean {
+        if (driveService == null) {
+            Log.e(TAG, "Drive service not initialized")
+            return false
+        }
+        
+        // 부모 폴더 ID가 없으면 찾기
+        if (parentFolderId == null) {
+            Log.d(TAG, "Parent folder ID not found, searching now...")
+            findParentFolder()
+            if (parentFolderId == null) {
+                Log.e(TAG, "Failed to find parent folder")
+                return false
+            }
+        }
+        
+        try {
+            // 매장 코드별 폴더 찾기 또는 생성
+            val shopFolderId = findOrCreateShopFolder(shopCode)
+            if (shopFolderId == null) {
+                Log.e(TAG, "Failed to find or create shop folder for: $shopCode")
+                return false
+            }
+            
+            // Google Drive 파일 메타데이터 생성
+            val fileMetadata = DriveFile().apply {
+                name = file.name
+                parents = Collections.singletonList(shopFolderId)
+                description = "SnapPay log file from shop $shopCode"
+            }
+            
+            // 파일 컨텐츠
+            val mediaContent = FileContent("application/json", file)
+            
+            // 파일 업로드
+            val uploadedFile = driveService?.files()?.create(fileMetadata, mediaContent)
+                ?.setFields("id, name, parents")
+                ?.execute()
+            
+            if (uploadedFile != null) {
+                Log.d(TAG, "File uploaded successfully: ${uploadedFile.name} (ID: ${uploadedFile.id})")
+                return true
+            }
+            
+        } catch (e: com.google.api.client.googleapis.json.GoogleJsonResponseException) {
+            Log.e(TAG, "Google Drive API error", e)
+            if (e.statusCode == 403 && e.details?.errors?.any { it.reason == "storageQuotaExceeded" } == true) {
+                Log.e(TAG, "❌ Storage quota exceeded - Service accounts cannot upload files")
+                Log.e(TAG, "This is a limitation of Google Drive service accounts.")
+                Log.e(TAG, "Alternative solutions:")
+                Log.e(TAG, "1. Use OAuth 2.0 with user authentication instead of service account")
+                Log.e(TAG, "2. Upload logs to your server and have the server upload to Google Drive")
+                Log.e(TAG, "3. Use Google Cloud Storage instead of Google Drive")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error uploading file to Google Drive", e)
+        }
+        
+        return false
+    }
+    
+    private fun findOrCreateShopFolder(shopCode: String): String? {
+        try {
+            // 매장 코드 폴더 찾기
+            val query = "name='$shopCode' and mimeType='application/vnd.google-apps.folder' and '$parentFolderId' in parents and trashed=false"
+            val result: FileList = driveService?.files()?.list()
+                ?.setQ(query)
+                ?.setSpaces("drive")
+                ?.setFields("files(id, name)")
+                ?.execute() ?: return null
+            
+            val files = result.files
+            if (files != null && files.isNotEmpty()) {
+                Log.d(TAG, "Found existing folder for shop: $shopCode")
+                return files[0].id
+            }
+            
+            // 서비스 계정은 폴더를 생성할 수 없음
+            Log.e(TAG, "❌ Shop folder '$shopCode' not found in shared folder")
+            Log.e(TAG, "Service accounts cannot create folders. Please create the folder manually in Google Drive:")
+            Log.e(TAG, "1. Go to the 'SnapPay Logs' folder in Google Drive")
+            Log.e(TAG, "2. Create a new folder named '$shopCode'")
+            Log.e(TAG, "3. The folder will be automatically detected on next upload")
+            
+            return null
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error finding shop folder", e)
+            return null
+        }
+    }
+    
+    fun testConnection(): Boolean {
+        return try {
+            if (driveService == null) {
+                Log.e(TAG, "Drive service is null")
+                return false
+            }
+            
+            // About API를 호출하여 연결 테스트
+            val about = driveService?.about()?.get()
+                ?.setFields("user")
+                ?.execute()
+            
+            if (about != null) {
+                Log.d(TAG, "Google Drive connection test successful")
+                Log.d(TAG, "Connected as: ${about.user?.emailAddress}")
+                true
+            } else {
+                Log.e(TAG, "Google Drive connection test failed - null response")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Google Drive connection test failed", e)
+            false
+        }
+    }
+}

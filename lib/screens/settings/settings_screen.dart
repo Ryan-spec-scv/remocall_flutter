@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:remocall_flutter/providers/auth_provider.dart';
 import 'package:remocall_flutter/screens/auth/pin_login_screen.dart';
 import 'package:remocall_flutter/screens/settings/notification_permission_screen.dart';
+import 'package:remocall_flutter/screens/settings/test_token_screen.dart';
 import 'package:remocall_flutter/utils/theme.dart';
+import 'package:remocall_flutter/config/app_config.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -11,7 +13,7 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-    final user = authProvider.currentUser;
+    final shop = authProvider.currentShop;
 
     return Scaffold(
       appBar: AppBar(
@@ -39,7 +41,7 @@ class SettingsScreen extends StatelessWidget {
                     ),
                     child: Center(
                       child: Text(
-                        user?.name.substring(0, 1).toUpperCase() ?? 'U',
+                        shop?.name.substring(0, 1).toUpperCase() ?? 'S',
                         style: AppTheme.headlineLarge.copyWith(
                           color: Colors.white,
                         ),
@@ -48,12 +50,12 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    user?.name ?? '사용자',
+                    shop?.name ?? '매장',
                     style: AppTheme.headlineMedium,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    user?.email ?? '',
+                    shop?.code ?? '',
                     style: AppTheme.bodyMedium.copyWith(
                       color: Colors.grey[600],
                     ),
@@ -101,13 +103,26 @@ class SettingsScreen extends StatelessWidget {
             _buildSettingItem(
               icon: Icons.info_outline,
               title: '앱 정보',
-              subtitle: '버전 1.0.0',
+              subtitle: '버전 ${AppConfig.appVersion}',
               onTap: () {
                 showAboutDialog(
                   context: context,
                   applicationName: '리모콜',
-                  applicationVersion: '1.0.0',
+                  applicationVersion: AppConfig.appVersion,
                   applicationLegalese: '© 2024 Remocall',
+                );
+              },
+            ),
+            _buildSettingItem(
+              icon: Icons.science_outlined,
+              title: '토큰 갱신 테스트',
+              subtitle: '개발자 옵션',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const TestTokenScreen(),
+                  ),
                 );
               },
             ),

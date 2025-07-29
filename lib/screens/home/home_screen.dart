@@ -148,6 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
@@ -155,18 +156,20 @@ class _HomeScreenState extends State<HomeScreen> {
     
     return Scaffold(
       body: _buildHomeTab(),
-      // floatingActionButton: FloatingActionButton(
-      //   onPressed: () {
-      //     Navigator.push(
-      //       context,
-      //       MaterialPageRoute(
-      //         builder: (context) => const NotificationTestScreen(),
-      //       ),
-      //     );
-      //   },
-      //   backgroundColor: AppTheme.primaryColor,
-      //   child: const Icon(Icons.notifications_active),
-      // ),
+      floatingActionButton: shop?.code == '0101' 
+        ? FloatingActionButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const NotificationTestScreen(),
+                ),
+              );
+            },
+            backgroundColor: AppTheme.primaryColor,
+            child: const Icon(Icons.notifications_active),
+          )
+        : null,
     );
   }
 

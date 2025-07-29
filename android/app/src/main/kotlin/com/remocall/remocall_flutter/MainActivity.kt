@@ -22,11 +22,14 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.*
 import org.json.JSONObject
+import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
 import android.app.NotificationChannel
 import android.app.PendingIntent
 import androidx.core.app.NotificationCompat
+import android.view.WindowManager
+import android.app.KeyguardManager
 
 class MainActivity : FlutterActivity() {
     
@@ -62,6 +65,11 @@ class MainActivity : FlutterActivity() {
                 "isServiceRunning" -> {
                     // Check if notification listener service is enabled
                     val isRunning = isNotificationListenerEnabled()
+                    // 서비스가 실행 중이 아니면 재시작 시도
+                    if (!isRunning) {
+                        Log.w(TAG, "NotificationService is not running, attempting to restart...")
+                        tryRestartNotificationService()
+                    }
                     result.success(isRunning)
                 }
                 "onNotificationReceived" -> {
@@ -102,6 +110,78 @@ class MainActivity : FlutterActivity() {
                 "openBatterySettings" -> {
                     openBatterySettings()
                     result.success(true)
+                }
+                "cleanNotificationQueue" -> {
+                    try {
+                        // NotificationService의 인스턴스가 없으므로 직접 큐 정리 로직 실행
+                        cleanNotificationQueue()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error cleaning notification queue", e)
+                        result.error("CLEAN_QUEUE_ERROR", e.message, null)
+                    }
+                }
+                "getFailedQueue" -> {
+                    try {
+                        val failedQueue = getFailedNotificationQueue()
+                        result.success(failedQueue)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error getting failed queue", e)
+                        result.error("GET_QUEUE_ERROR", e.message, null)
+                    }
+                }
+                "getLogFiles" -> {
+                    try {
+                        val logManager = LogManager.getInstance(this)
+                        val logFiles = logManager.getLogFiles()
+                        val fileList = JSONArray()
+                        
+                        logFiles.forEach { file ->
+                            val fileInfo = JSONObject().apply {
+                                put("name", file.name)
+                                put("size", file.length())
+                                put("lastModified", file.lastModified())
+                            }
+                            fileList.put(fileInfo)
+                        }
+                        
+                        result.success(fileList.toString())
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error getting log files", e)
+                        result.error("GET_LOGS_ERROR", e.message, null)
+                    }
+                }
+                "readLogFile" -> {
+                    try {
+                        val fileName = call.argument<String>("fileName")
+                        if (fileName == null) {
+                            result.error("INVALID_ARGUMENT", "fileName is required", null)
+                            return@setMethodCallHandler
+                        }
+                        
+                        val logManager = LogManager.getInstance(this)
+                        val logs = logManager.readLogFile(fileName)
+                        val logsArray = JSONArray()
+                        
+                        logs.forEach { log ->
+                            logsArray.put(log)
+                        }
+                        
+                        result.success(logsArray.toString())
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error reading log file", e)
+                        result.error("READ_LOG_ERROR", e.message, null)
+                    }
+                }
+                "triggerLogUpload" -> {
+                    try {
+                        val logManager = LogManager.getInstance(this)
+                        logManager.triggerUpload()
+                        result.success("Upload triggered")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error triggering log upload", e)
+                        result.error("UPLOAD_ERROR", e.message, null)
+                    }
                 }
                 else -> {
                     result.notImplemented()
@@ -145,6 +225,23 @@ class MainActivity : FlutterActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // 화면 켜기 및 잠금 화면 위에 표시 설정
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+            
+            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            keyguardManager.requestDismissKeyguard(this, null)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+        }
         
         // Request notification permission for Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -198,6 +295,7 @@ class MainActivity : FlutterActivity() {
             // 권한 요청
             requestNotificationAccess()
         }
+        
     }
     
     private fun tryRestartNotificationService() {
@@ -227,6 +325,7 @@ class MainActivity : FlutterActivity() {
             unregisterReceiver(it)
         }
     }
+    
     
     private fun isNotificationServiceEnabled(): Boolean {
         val componentName = ComponentName(this, NotificationService::class.java)
@@ -526,5 +625,110 @@ class MainActivity : FlutterActivity() {
                 ))
             }
         }
+    }
+    
+    // 입금 알림이 아닌 항목들을 큐에서 제거
+    private fun cleanNotificationQueue() {
+        try {
+            Log.d(TAG, "=== CLEANING NOTIFICATION QUEUE ===")
+            val prefs = getSharedPreferences("NotificationQueue", Context.MODE_PRIVATE)
+            val existingQueue = prefs.getString("failed_notifications", "[]") ?: "[]"
+            val queueArray = org.json.JSONArray(existingQueue)
+            
+            val cleanedArray = org.json.JSONArray()
+            var removedCount = 0
+            
+            for (i in 0 until queueArray.length()) {
+                val notification = queueArray.getJSONObject(i)
+                val message = notification.getString("message")
+                
+                // 입금 알림인지 확인 (NotificationService와 동일한 로직)
+                if (isDepositNotification(message)) {
+                    cleanedArray.put(notification)
+                    Log.d(TAG, "Keeping deposit notification: $message")
+                } else {
+                    removedCount++
+                    Log.d(TAG, "Removing non-deposit notification: $message")
+                }
+            }
+            
+            // 정리된 큐 저장
+            prefs.edit()
+                .putString("failed_notifications", cleanedArray.toString())
+                .apply()
+                
+            Log.d(TAG, "Queue cleaned. Removed $removedCount non-deposit notifications. Remaining: ${cleanedArray.length()}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error cleaning notification queue", e)
+            throw e
+        }
+    }
+    
+    // 실패한 알림 큐 가져오기
+    private fun getFailedNotificationQueue(): String {
+        try {
+            val prefs = getSharedPreferences("NotificationQueue", Context.MODE_PRIVATE)
+            val queueJson = prefs.getString("failed_notifications", "[]") ?: "[]"
+            
+            // JSON 배열을 파싱하여 상세 정보 추가
+            val queueArray = JSONArray(queueJson)
+            val resultArray = JSONArray()
+            
+            for (i in 0 until queueArray.length()) {
+                val notification = queueArray.getJSONObject(i)
+                val message = notification.getString("message")
+                
+                // 각 알림에 추가 정보 포함
+                val detailedNotification = JSONObject().apply {
+                    put("id", notification.getString("id"))
+                    put("message", message)
+                    put("retryCount", notification.getInt("retryCount"))
+                    put("createdAt", notification.getLong("createdAt"))
+                    put("lastRetryTime", notification.getLong("lastRetryTime"))
+                    put("isDeposit", isDepositNotification(message))
+                    
+                    // 생성 시간으로부터 경과 시간 계산
+                    val elapsedMinutes = (System.currentTimeMillis() - notification.getLong("createdAt")) / 60000
+                    put("elapsedMinutes", elapsedMinutes)
+                }
+                
+                resultArray.put(detailedNotification)
+            }
+            
+            val result = JSONObject().apply {
+                put("totalCount", resultArray.length())
+                put("notifications", resultArray)
+            }
+            
+            return result.toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting failed notification queue", e)
+            return JSONObject().apply {
+                put("totalCount", 0)
+                put("notifications", JSONArray())
+                put("error", e.message)
+            }.toString()
+        }
+    }
+    
+    // 입금 알림인지 확인하는 함수 (NotificationService와 동일)
+    private fun isDepositNotification(message: String): Boolean {
+        // 입금 패턴: "이름(마스킹)님이 금액원을 보냈어요"
+        val depositPattern = Regex(".*\\(.*\\*.*\\)님이\\s+[0-9,]+원을\\s+보냈어요\\.?")
+        
+        // 제외할 패턴들 (송금, 이체 등)
+        val excludePatterns = listOf(
+            "송금했어요",
+            "이체했어요",
+            "계좌로",
+            "출금",
+            "결제",
+            "환불",
+            "취소"
+        )
+        
+        // 입금 패턴과 일치하고, 제외 패턴이 없을 때만 true
+        return message.matches(depositPattern) && 
+               excludePatterns.none { message.contains(it) }
     }
 }

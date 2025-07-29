@@ -2,9 +2,14 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:remocall_flutter/config/app_config.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
   late final Dio _dio;
+  String? _accessToken;
+  String? _refreshToken;
+  bool _isRefreshing = false;
+  final _refreshCompleter = <Function>[];
 
   ApiService() {
     _dio = Dio(BaseOptions(
@@ -13,6 +18,60 @@ class ApiService {
       receiveTimeout: AppConfig.receiveTimeout,
       headers: {
         'Content-Type': 'application/json',
+      },
+    ));
+
+    // 요청 인터셉터 - 토큰 추가
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        // 토큰 불필요한 엔드포인트
+        if (options.path.contains('/auth/login') || 
+            options.path.contains('/auth/refresh') ||
+            options.data is Map && options.data['skipAuth'] == true) {
+          return handler.next(options);
+        }
+        
+        // 토큰 로드
+        // 이미 Authorization 헤더가 있으면 그대로 사용
+        if (options.headers['Authorization'] != null) {
+          return handler.next(options);
+        }
+        
+        if (_accessToken == null) {
+          await _loadTokens();
+        }
+        
+        if (_accessToken != null) {
+          options.headers['Authorization'] = 'Bearer $_accessToken';
+        }
+        return handler.next(options);
+      },
+      onError: (error, handler) async {
+        if (error.response?.statusCode == 401 && 
+            !error.requestOptions.path.contains('/auth/refresh')) {
+          // 토큰 갱신 시도
+          if (await _refreshTokenIfNeeded()) {
+            // 토큰 갱신 성공 - 원래 요청 재시도
+            try {
+              final response = await _dio.request(
+                error.requestOptions.path,
+                data: error.requestOptions.data,
+                queryParameters: error.requestOptions.queryParameters,
+                options: Options(
+                  method: error.requestOptions.method,
+                  headers: {
+                    ...error.requestOptions.headers,
+                    'Authorization': 'Bearer $_accessToken',
+                  },
+                ),
+              );
+              return handler.resolve(response);
+            } catch (e) {
+              return handler.reject(error);
+            }
+          }
+        }
+        return handler.next(error);
       },
     ));
 
@@ -26,6 +85,79 @@ class ApiService {
         print('[Dio] $message');
       },
     ));
+    
+    // 토큰 초기 로드
+    _loadTokens();
+  }
+  
+  // SharedPreferences에서 토큰 로드
+  Future<void> _loadTokens() async {
+    final prefs = await SharedPreferences.getInstance();
+    _accessToken = prefs.getString('flutter.access_token');
+    _refreshToken = prefs.getString('flutter.refresh_token');
+  }
+  
+  // 토큰 저장
+  Future<void> _saveTokens(String accessToken, String refreshToken) async {
+    _accessToken = accessToken;
+    _refreshToken = refreshToken;
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('flutter.access_token', accessToken);
+    await prefs.setString('flutter.refresh_token', refreshToken);
+  }
+  
+  // 토큰 갱신
+  Future<bool> _refreshTokenIfNeeded() async {
+    if (_isRefreshing) {
+      // 이미 갱신 중이면 대기
+      final completer = () async {};
+      _refreshCompleter.add(completer);
+      await completer();
+      return _accessToken != null;
+    }
+    
+    _isRefreshing = true;
+    
+    try {
+      if (_refreshToken == null) {
+        await _loadTokens();
+        if (_refreshToken == null) {
+          print('[API] No refresh token available');
+          return false;
+        }
+      }
+      
+      print('[API] Attempting token refresh...');
+      final response = await _dio.post(
+        '/api/shop/auth/refresh',
+        data: {'refresh_token': _refreshToken},
+      );
+      
+      if (response.data['success'] == true) {
+        final newAccessToken = response.data['data']['access_token'];
+        final newRefreshToken = response.data['data']['refresh_token'];
+        
+        await _saveTokens(newAccessToken, newRefreshToken);
+        print('[API] Token refresh successful');
+        
+        // 대기 중인 요청들 처리
+        for (final completer in _refreshCompleter) {
+          completer();
+        }
+        _refreshCompleter.clear();
+        
+        return true;
+      } else {
+        print('[API] Token refresh failed: ${response.data['message']}');
+        return false;
+      }
+    } catch (e) {
+      print('[API] Token refresh error: $e');
+      return false;
+    } finally {
+      _isRefreshing = false;
+    }
   }
 
   // 매장 로그인 (PIN 방식)
@@ -266,9 +398,9 @@ class ApiService {
     String? token,
   }) async {
     try {
-      // BaseURL을 임시로 변경
+      // BaseURL을 AppConfig에서 가져옴
       final tempDio = Dio(BaseOptions(
-        baseUrl: 'https://admin-api.snappay.online',
+        baseUrl: AppConfig.baseUrl,
         connectTimeout: AppConfig.connectionTimeout,
         receiveTimeout: AppConfig.receiveTimeout,
         headers: {
