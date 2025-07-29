@@ -493,10 +493,9 @@ class NotificationService : NotificationListenerService() {
                     }
                 }
                 
-                // 송금 관련 알림인지 확인하고 화면 켜기
-                if ((title == "카카오페이" && bigText.contains("코드송금 받기가 완료되었어요")) ||
-                    (bigText.contains("님이") && bigText.contains("원을 보냈어요"))) {
-                    Log.d(TAG, "💰 Payment notification detected - Waking up screen")
+                // 카카오페이 알림이면 화면 켜기
+                if (title == "카카오페이") {
+                    Log.d(TAG, "💰 KakaoPay notification detected - Waking up screen")
                     wakeUpAndUnlock()
                 }
             } catch (e: Exception) {
