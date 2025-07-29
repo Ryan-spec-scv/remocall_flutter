@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SnapPay</string>
+    <string name="accessibility_service_description">카카오페이 알림 수신 시 자동으로 잠금화면을 해제합니다. 이 기능은 오직 카카오페이 송금 알림에만 반응하며, 다른 개인정보는 수집하지 않습니다.</string>
+    <string name="version_name">1.0.40</string>
+    <string name="changelog">- 매장코드 영문/숫자 입력 지원\n- 페이지네이션 UI 개선\n- 카카오페이 알림 자동 화면 켜기</string>
+    <string name="version_date">2025-07-29</string>
+</resources>

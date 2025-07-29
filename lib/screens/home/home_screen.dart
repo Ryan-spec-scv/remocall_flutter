@@ -24,9 +24,10 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const platform = MethodChannel('com.remocall/notifications');
   bool _hasNotificationAccess = false;
+  bool _isAccessibilityServiceEnabled = false;
   // Timer? _refreshTimer; // 자동 갱신 제거됨
   bool _isFirstLoad = true;
   final UpdateService _updateService = UpdateService();
@@ -35,9 +36,11 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Android에서만 알림 권한 체크
     if (Platform.isAndroid) {
       _checkNotificationPermission();
+      _checkAccessibilityService(); // 접근성 서비스 체크
     }
     _loadDataInitial();
     _checkForUpdate(); // 업데이트 체크 추가
@@ -47,8 +50,18 @@ class _HomeScreenState extends State<HomeScreen> {
   
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // _refreshTimer?.cancel(); // 자동 갱신 제거됨
     super.dispose();
+  }
+  
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && Platform.isAndroid) {
+      // 앱이 포그라운드로 돌아왔을 때 접근성 서비스 상태 재확인
+      print('[HomeScreen] App resumed, checking accessibility service status...');
+      _checkAccessibilityService();
+    }
   }
   
   Future<void> _checkNotificationPermission() async {
@@ -75,6 +88,28 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _hasNotificationAccess = false;
+        });
+      }
+    }
+  }
+  
+  Future<void> _checkAccessibilityService() async {
+    if (!Platform.isAndroid) return;
+    
+    try {
+      final bool isEnabled = await platform.invokeMethod('isAccessibilityServiceEnabled');
+      print('[HomeScreen] Accessibility service status: $isEnabled');
+      
+      if (mounted) {
+        setState(() {
+          _isAccessibilityServiceEnabled = isEnabled;
+        });
+      }
+    } on PlatformException catch (e) {
+      print('Failed to check accessibility service: ${e.message}');
+      if (mounted) {
+        setState(() {
+          _isAccessibilityServiceEnabled = false;
         });
       }
     }
@@ -180,22 +215,66 @@ class _HomeScreenState extends State<HomeScreen> {
     final currencyFormatter = NumberFormat.currency(locale: 'ko_KR', symbol: '₩');
     
     return SafeArea(
-      child: RefreshIndicator(
-        onRefresh: _loadDataInitial,
-        displacement: 100,
-        backgroundColor: AppTheme.primaryColor,
-        color: Colors.white,
-        strokeWidth: 4,
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header
-                    Row(
+      child: Column(
+        children: [
+          // 접근성 서비스 비활성화 배너
+          if (!_isAccessibilityServiceEnabled && Platform.isAndroid)
+            Material(
+              color: Colors.orange.shade100,
+              child: InkWell(
+                onTap: () async {
+                  try {
+                    await platform.invokeMethod('openAccessibilitySettings');
+                  } catch (e) {
+                    print('Failed to open accessibility settings: $e');
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded, 
+                        color: Colors.orange.shade800,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          '카카오페이 자동 잠금해제가 비활성화되어 있습니다',
+                          style: TextStyle(
+                            color: Colors.orange.shade800,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(Icons.arrow_forward_ios, 
+                        color: Colors.orange.shade800,
+                        size: 16,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _loadDataInitial,
+              displacement: 100,
+              backgroundColor: AppTheme.primaryColor,
+              color: Colors.white,
+              strokeWidth: 4,
+              child: CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Header
+                          Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
@@ -575,8 +654,11 @@ class _HomeScreenState extends State<HomeScreen> {
             const SliverToBoxAdapter(
               child: SizedBox(height: 24),
             ),
-          ],
-        ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

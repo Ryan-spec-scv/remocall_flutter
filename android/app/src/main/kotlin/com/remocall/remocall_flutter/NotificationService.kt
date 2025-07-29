@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -496,6 +497,11 @@ class NotificationService : NotificationListenerService() {
                 // 카카오페이 알림이면 화면 켜기
                 if (title == "카카오페이") {
                     Log.d(TAG, "💰 KakaoPay notification detected - Waking up screen")
+                    
+                    // AccessibilityService에 신호 보내기
+                    SnapPayAccessibilityService.setKakaoPayUnlockNeeded(true)
+                    
+                    // 화면 켜기
                     wakeUpAndUnlock()
                 }
             } catch (e: Exception) {
@@ -1226,6 +1232,22 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
+    // AccessibilityService 활성화 확인
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        try {
+            val serviceName = "${packageName}/${SnapPayAccessibilityService::class.java.canonicalName}"
+            val enabledServices = Settings.Secure.getString(
+                contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            )
+            
+            return enabledServices?.contains(serviceName) == true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking accessibility service", e)
+            return false
+        }
+    }
+    
     // 화면 켜기 및 잠금 해제 함수
     private fun wakeUpAndUnlock() {
         try {
@@ -1245,19 +1267,34 @@ class NotificationService : NotificationListenerService() {
                 Log.d(TAG, "Screen wake lock acquired")
             }
             
-            // MainActivity를 실행하여 앱을 전면으로 가져오기
-            val intent = Intent(applicationContext, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                
-                // 잠금화면 해제를 위한 추가 플래그
-                addFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION)
-                addFlags(Intent.FLAG_FROM_BACKGROUND)
-            }
+            // AccessibilityService가 활성화되어 있는지 확인
+            val isAccessibilityEnabled = isAccessibilityServiceEnabled()
+            Log.d(TAG, "AccessibilityService enabled: $isAccessibilityEnabled")
             
-            startActivity(intent)
-            Log.d(TAG, "MainActivity launched to unlock screen")
+            if (isAccessibilityEnabled) {
+                // AccessibilityService가 잠금화면을 해제하도록 기다림
+                Log.d(TAG, "Waiting for AccessibilityService to unlock screen...")
+                Thread.sleep(1000) // 1초 대기
+            } else {
+                // AccessibilityService가 비활성화된 경우 기존 방식 사용
+                Log.d(TAG, "AccessibilityService not enabled, using MainActivity approach")
+                
+                val intent = Intent(applicationContext, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    
+                    // 잠금화면 해제를 위한 추가 플래그
+                    addFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION)
+                    addFlags(Intent.FLAG_FROM_BACKGROUND)
+                    
+                    // 카카오페이 알림 플래그 추가
+                    putExtra("isKakaoPayNotification", true)
+                }
+                
+                startActivity(intent)
+                Log.d(TAG, "MainActivity launched to unlock screen")
+            }
             
         } catch (e: Exception) {
             Log.e(TAG, "Error waking up and unlocking screen: ${e.message}", e)

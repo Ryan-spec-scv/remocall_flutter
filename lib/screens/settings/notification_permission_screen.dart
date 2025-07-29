@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:remocall_flutter/services/notification_service.dart';
 import 'package:remocall_flutter/utils/theme.dart';
@@ -12,7 +14,9 @@ class NotificationPermissionScreen extends StatefulWidget {
 }
 
 class _NotificationPermissionScreenState extends State<NotificationPermissionScreen> {
+  static const platform = MethodChannel('com.remocall/notifications');
   bool _isPermissionGranted = false;
+  bool _isAccessibilityEnabled = false;
   bool _isChecking = true;
   
   @override
@@ -25,10 +29,21 @@ class _NotificationPermissionScreenState extends State<NotificationPermissionScr
     setState(() => _isChecking = true);
     
     final hasPermission = await NotificationService.instance.checkNotificationPermission();
+    bool hasAccessibility = false;
+    
+    // Android에서만 접근성 서비스 확인
+    if (Platform.isAndroid) {
+      try {
+        hasAccessibility = await platform.invokeMethod('isAccessibilityServiceEnabled');
+      } catch (e) {
+        print('Failed to check accessibility service: $e');
+      }
+    }
     
     if (mounted) {
       setState(() {
         _isPermissionGranted = hasPermission;
+        _isAccessibilityEnabled = hasAccessibility;
         _isChecking = false;
       });
     }
@@ -42,12 +57,24 @@ class _NotificationPermissionScreenState extends State<NotificationPermissionScr
     _checkPermission();
   }
   
+  Future<void> _requestAccessibilityPermission() async {
+    try {
+      await platform.invokeMethod('openAccessibilitySettings');
+      
+      // 설정 화면에서 돌아올 때 상태 체크
+      await Future.delayed(const Duration(seconds: 1));
+      _checkPermission();
+    } catch (e) {
+      print('Failed to open accessibility settings: $e');
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          '알림 권한 설정',
+          '권한 설정',
           style: AppTheme.headlineSmall,
         ),
         elevation: 0,
@@ -60,94 +87,58 @@ class _NotificationPermissionScreenState extends State<NotificationPermissionScr
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Status Icon
-                  Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      color: _isPermissionGranted
-                          ? AppTheme.successColor.withOpacity(0.1)
-                          : AppTheme.errorColor.withOpacity(0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      _isPermissionGranted
-                          ? Icons.check_circle
-                          : Icons.notifications_off,
-                      size: 60,
-                      color: _isPermissionGranted
-                          ? AppTheme.successColor
-                          : AppTheme.errorColor,
-                    ),
-                  ).animate().fadeIn().scale(),
+                  // 권한 상태 카드들
+                  _buildPermissionCard(
+                    title: '알림 접근 권한',
+                    description: '카카오톡 알림을 읽어 거래내역을 자동으로 기록합니다',
+                    isEnabled: _isPermissionGranted,
+                    onTap: _isPermissionGranted ? null : _requestPermission,
+                  ).animate().fadeIn(),
+                  
+                  if (Platform.isAndroid) ...[
+                    const SizedBox(height: 16),
+                    _buildPermissionCard(
+                      title: '자동 잠금해제',
+                      description: '카카오페이 알림 수신 시 자동으로 잠금화면을 해제합니다',
+                      isEnabled: _isAccessibilityEnabled,
+                      onTap: _isAccessibilityEnabled ? null : _requestAccessibilityPermission,
+                    ).animate().fadeIn(delay: 200.ms),
+                  ],
                   
                   const SizedBox(height: 32),
                   
-                  // Status Text
-                  Text(
-                    _isPermissionGranted
-                        ? '알림 권한이 활성화되었습니다'
-                        : '알림 권한이 필요합니다',
-                    style: AppTheme.headlineMedium,
-                    textAlign: TextAlign.center,
-                  ).animate().fadeIn(delay: 200.ms),
-                  
-                  const SizedBox(height: 16),
-                  
-                  Text(
-                    _isPermissionGranted
-                        ? '이제 카카오톡 알림을 자동으로 읽을 수 있습니다'
-                        : '카카오톡 알림을 읽어 거래내역을 자동으로 기록하려면\n알림 접근 권한이 필요합니다',
-                    style: AppTheme.bodyLarge.copyWith(
-                      color: Colors.grey[600],
-                    ),
-                    textAlign: TextAlign.center,
-                  ).animate().fadeIn(delay: 300.ms),
-                  
-                  const SizedBox(height: 48),
-                  
-                  if (!_isPermissionGranted) ...[
-                    // Instructions
-                    _buildInstructionCard().animate().fadeIn(delay: 400.ms),
-                    
-                    const SizedBox(height: 32),
-                    
-                    // Permission Button
-                    CustomButton(
-                      text: '권한 설정하기',
-                      onPressed: _requestPermission,
-                      isGradient: true,
-                      icon: Icons.settings,
-                    ).animate().fadeIn(delay: 500.ms),
-                  ] else ...[
-                    // Success Card
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          children: [
-                            Icon(
-                              Icons.info_outline,
-                              color: AppTheme.infoColor,
-                              size: 32,
+                  // 전체 상태 표시
+                  if (_isPermissionGranted && (!Platform.isAndroid || _isAccessibilityEnabled)) ...[
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: AppTheme.successColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            color: AppTheme.successColor,
+                            size: 48,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            '모든 권한이 활성화되었습니다',
+                            style: AppTheme.bodyLarge.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.successColor,
                             ),
-                            const SizedBox(height: 12),
-                            Text(
-                              '알림 서비스 작동 중',
-                              style: AppTheme.bodyLarge.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '카카오톡 알림을 자동으로 처리할 수 있습니다',
+                            style: AppTheme.bodyMedium.copyWith(
+                              color: Colors.grey[600],
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '카카오톡에서 금융 관련 알림이 오면\n자동으로 거래내역이 기록됩니다',
-                              style: AppTheme.bodyMedium.copyWith(
-                                color: Colors.grey[600],
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       ),
                     ).animate().fadeIn(delay: 400.ms),
                     
@@ -251,6 +242,79 @@ class _NotificationPermissionScreenState extends State<NotificationPermissionScr
           ),
         ),
       ],
+    );
+  }
+  
+  Widget _buildPermissionCard({
+    required String title,
+    required String description,
+    required bool isEnabled,
+    VoidCallback? onTap,
+  }) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isEnabled 
+            ? AppTheme.successColor.withOpacity(0.3)
+            : Colors.grey.withOpacity(0.2),
+          width: 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: isEnabled
+                    ? AppTheme.successColor.withOpacity(0.1)
+                    : Colors.grey.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isEnabled ? Icons.check_circle : Icons.error_outline,
+                  color: isEnabled ? AppTheme.successColor : Colors.grey,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: AppTheme.bodyLarge.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      style: AppTheme.bodySmall.copyWith(
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!isEnabled)
+                Icon(
+                  Icons.arrow_forward_ios,
+                  size: 16,
+                  color: Colors.grey,
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

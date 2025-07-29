@@ -22,7 +22,7 @@ class ShopProfileScreen extends StatefulWidget {
   State<ShopProfileScreen> createState() => _ShopProfileScreenState();
 }
 
-class _ShopProfileScreenState extends State<ShopProfileScreen> {
+class _ShopProfileScreenState extends State<ShopProfileScreen> with WidgetsBindingObserver {
   static const platform = MethodChannel('com.remocall/notifications');
   final currencyFormatter = NumberFormat.currency(locale: 'ko_KR', symbol: '₩');
   bool _isLoading = true;
@@ -36,12 +36,14 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
   bool _hasNotificationAccess = false;
   bool _isServiceRunning = false;
   bool _isPowerSaveMode = false;
+  bool _isAccessibilityServiceEnabled = false;
   Timer? _statusTimer;
   String _appVersion = '';
   
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadShopProfileInitial();
     _startAutoRefresh();
     _loadAppVersion();
@@ -55,6 +57,22 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
         _scrollToUpdateButton();
       }
     });
+  }
+  
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _statusTimer?.cancel();
+    super.dispose();
+  }
+  
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && Platform.isAndroid) {
+      // 앱이 포그라운드로 돌아왔을 때 권한 상태 재확인
+      print('[ShopProfile] App resumed, checking permissions...');
+      _checkPermissionsAndStatus();
+    }
   }
   
   void _scrollToUpdateButton() {
@@ -88,11 +106,6 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
     }
   }
   
-  @override
-  void dispose() {
-    // _refreshTimer?.cancel(); // 자동 갱신 제거됨
-    super.dispose();
-  }
   
   Future<void> _checkPermissionsAndStatus() async {
     // Android에서만 작동
@@ -112,18 +125,23 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
       final hasPermission = await platform.invokeMethod('checkNotificationPermission');
       final isRunning = await platform.invokeMethod('isServiceRunning');
       
+      // 접근성 서비스 체크
+      final isAccessibilityEnabled = await platform.invokeMethod('isAccessibilityServiceEnabled');
+      
       // 배터리 설정 체크
       final batterySettings = await platform.invokeMethod('getBatterySettings') as Map<dynamic, dynamic>?;
       
       print('[ShopProfile] Permission check results:');
       print('  - hasNotificationAccess: $hasPermission');
       print('  - isServiceRunning: $isRunning');
+      print('  - isAccessibilityEnabled: $isAccessibilityEnabled');
       print('  - batterySettings: $batterySettings');
       
       if (mounted) {
         setState(() {
           _hasNotificationAccess = hasPermission ?? false;
           _isServiceRunning = isRunning ?? false;
+          _isAccessibilityServiceEnabled = isAccessibilityEnabled ?? false;
           
           if (batterySettings != null) {
             _isPowerSaveMode = batterySettings['powerSaveMode'] ?? false;
@@ -487,6 +505,9 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
                         const SizedBox(height: 12),
                         _buildStatusRow('알림 모니터링 작동 중', _isServiceRunning, Icons.monitor_heart,
                           onSettingsTap: !_isServiceRunning ? () => _openNotificationSettings() : null),
+                        const SizedBox(height: 12),
+                        _buildStatusRow('자동 잠금해제', _isAccessibilityServiceEnabled, Icons.lock_open,
+                          onSettingsTap: !_isAccessibilityServiceEnabled ? () => _openAccessibilitySettings() : null),
                         const SizedBox(height: 24),
                         Text(
                           '배터리 설정',
@@ -881,6 +902,18 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> {
       await platform.invokeMethod('openBatterySettings');
     } catch (e) {
       print('Error opening battery settings: $e');
+    }
+  }
+  
+  void _openAccessibilitySettings() async {
+    try {
+      await platform.invokeMethod('openAccessibilitySettings');
+      // 설정에서 돌아올 때 상태 재확인
+      Timer(const Duration(seconds: 1), () {
+        _checkPermissionsAndStatus();
+      });
+    } catch (e) {
+      print('Error opening accessibility settings: $e');
     }
   }
 

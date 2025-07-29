@@ -30,6 +30,8 @@ import android.app.PendingIntent
 import androidx.core.app.NotificationCompat
 import android.view.WindowManager
 import android.app.KeyguardManager
+import android.os.Handler
+import android.accessibilityservice.AccessibilityServiceInfo
 
 class MainActivity : FlutterActivity() {
     
@@ -183,6 +185,15 @@ class MainActivity : FlutterActivity() {
                         result.error("UPLOAD_ERROR", e.message, null)
                     }
                 }
+                "isAccessibilityServiceEnabled" -> {
+                    val isEnabled = isAccessibilityServiceEnabled()
+                    Log.d(TAG, "Accessibility service enabled: $isEnabled")
+                    result.success(isEnabled)
+                }
+                "openAccessibilitySettings" -> {
+                    openAccessibilitySettings()
+                    result.success(true)
+                }
                 else -> {
                     result.notImplemented()
                 }
@@ -226,25 +237,38 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // 카카오페이 알림으로 인한 실행인지 확인
+        val isKakaoPayNotification = intent?.getBooleanExtra("isKakaoPayNotification", false) ?: false
+        if (isKakaoPayNotification) {
+            Log.d(TAG, "onCreate: Launched from KakaoPay notification")
+        }
+        
         // 화면 켜기 및 잠금 화면 위에 표시 설정
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
             
             val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-            keyguardManager.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
-                override fun onDismissError() {
-                    Log.e(TAG, "Keyguard dismiss error")
-                }
-                
-                override fun onDismissSucceeded() {
-                    Log.d(TAG, "Keyguard dismissed successfully")
-                }
-                
-                override fun onDismissCancelled() {
-                    Log.d(TAG, "Keyguard dismiss cancelled")
-                }
-            })
+            if (keyguardManager.isKeyguardLocked) {
+                Log.d(TAG, "onCreate: Keyguard is locked, attempting to dismiss...")
+                keyguardManager.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
+                    override fun onDismissError() {
+                        Log.e(TAG, "Keyguard dismiss error in onCreate")
+                        // 에러 발생시 추가 시도
+                        if (isKakaoPayNotification) {
+                            tryAlternativeUnlock()
+                        }
+                    }
+                    
+                    override fun onDismissSucceeded() {
+                        Log.d(TAG, "Keyguard dismissed successfully in onCreate")
+                    }
+                    
+                    override fun onDismissCancelled() {
+                        Log.d(TAG, "Keyguard dismiss cancelled in onCreate")
+                    }
+                })
+            }
         } else {
             @Suppress("DEPRECATION")
             window.addFlags(
@@ -308,6 +332,55 @@ class MainActivity : FlutterActivity() {
             requestNotificationAccess()
         }
         
+    }
+    
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        Log.d(TAG, "onNewIntent called")
+        
+        // 카카오페이 알림으로 인한 실행인지 확인
+        val isKakaoPayNotification = intent.getBooleanExtra("isKakaoPayNotification", false)
+        if (isKakaoPayNotification) {
+            Log.d(TAG, "Launched from KakaoPay notification - attempting to unlock screen")
+        }
+        
+        // 잠금화면 해제 처리 - onCreate와 동일한 로직
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+            
+            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            if (keyguardManager.isKeyguardLocked) {
+                Log.d(TAG, "Keyguard is locked, attempting to dismiss...")
+                keyguardManager.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
+                    override fun onDismissError() {
+                        Log.e(TAG, "Keyguard dismiss error in onNewIntent")
+                        // 에러 발생시 추가 시도
+                        if (isKakaoPayNotification) {
+                            tryAlternativeUnlock()
+                        }
+                    }
+                    
+                    override fun onDismissSucceeded() {
+                        Log.d(TAG, "Keyguard dismissed successfully in onNewIntent")
+                    }
+                    
+                    override fun onDismissCancelled() {
+                        Log.d(TAG, "Keyguard dismiss cancelled in onNewIntent")
+                    }
+                })
+            } else {
+                Log.d(TAG, "Keyguard is not locked")
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+        }
     }
     
     private fun tryRestartNotificationService() {
@@ -742,5 +815,114 @@ class MainActivity : FlutterActivity() {
         // 입금 패턴과 일치하고, 제외 패턴이 없을 때만 true
         return message.matches(depositPattern) && 
                excludePatterns.none { message.contains(it) }
+    }
+    
+    // 대체 잠금화면 해제 방법
+    private fun tryAlternativeUnlock() {
+        Log.d(TAG, "Trying alternative unlock method...")
+        
+        try {
+            // 추가 플래그 설정
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                // 액티비티를 다시 최상위로 가져오기
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+                
+                // KeyguardManager를 통해 추가 시도
+                val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+                
+                // 일반 스와이프 잠금화면의 경우를 위한 처리
+                if (keyguardManager.isKeyguardLocked && !keyguardManager.isDeviceLocked) {
+                    Log.d(TAG, "Device has swipe-only lock, attempting to bypass...")
+                    
+                    // Window 플래그 재설정
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    
+                    // 액티비티 재생성 시도
+                    Handler(mainLooper).postDelayed({
+                        Log.d(TAG, "Attempting activity recreation for lockscreen bypass")
+                        recreate()
+                    }, 100)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in tryAlternativeUnlock: ${e.message}", e)
+        }
+    }
+    
+    // 접근성 서비스 활성화 확인
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        try {
+            val serviceName = "${packageName}/${SnapPayAccessibilityService::class.java.canonicalName}"
+            Log.d(TAG, "Checking accessibility service: $serviceName")
+            
+            // 방법 1: AccessibilityManager 사용
+            val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as android.view.accessibility.AccessibilityManager
+            val enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+            
+            for (service in enabledServices) {
+                val serviceId = service.id
+                Log.d(TAG, "Enabled service found: $serviceId")
+                if (serviceId == serviceName) {
+                    Log.d(TAG, "Our accessibility service is enabled via AccessibilityManager")
+                    return true
+                }
+            }
+            
+            // 방법 2: Settings.Secure 사용 (fallback)
+            val settingsValue = try {
+                Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "SecurityException reading settings, trying alternative method", e)
+                null
+            }
+            
+            Log.d(TAG, "Settings.Secure value: $settingsValue")
+            
+            if (!settingsValue.isNullOrEmpty()) {
+                val isEnabled = settingsValue.contains(serviceName) || 
+                               settingsValue.contains(SnapPayAccessibilityService::class.java.simpleName)
+                Log.d(TAG, "Is enabled via Settings.Secure: $isEnabled")
+                return isEnabled
+            }
+            
+            // 방법 3: 직접 서비스 실행 상태 확인
+            val runningServices = (getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager)
+                .getRunningServices(Integer.MAX_VALUE)
+            
+            for (service in runningServices) {
+                if (service.service.className == SnapPayAccessibilityService::class.java.name) {
+                    Log.d(TAG, "Our accessibility service is running")
+                    return true
+                }
+            }
+            
+            Log.d(TAG, "Accessibility service is not enabled")
+            return false
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking accessibility service", e)
+            return false
+        }
+    }
+    
+    // 접근성 설정 화면 열기
+    private fun openAccessibilitySettings() {
+        try {
+            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            startActivity(intent)
+            
+            // 사용자에게 안내 메시지 표시
+            Handler(mainLooper).postDelayed({
+                runOnUiThread {
+                    methodChannel.invokeMethod("showAccessibilityGuide", null)
+                }
+            }, 500)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error opening accessibility settings", e)
+            // 대체 방법 시도
+            val intent = Intent(Settings.ACTION_SETTINGS)
+            startActivity(intent)
+        }
     }
 }
