@@ -516,9 +516,9 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   List<Widget> _buildPageNumbers() {
     List<Widget> pageButtons = [];
     
-    // 표시할 페이지 범위 계산
-    int startPage = ((_currentPage - 1) ~/ 5) * 5 + 1;
-    int endPage = (startPage + 4).clamp(1, _totalPages);
+    // 표시할 페이지 범위 계산 (4개씩 그룹으로 표시)
+    int startPage = ((_currentPage - 1) ~/ 4) * 4 + 1;
+    int endPage = (startPage + 3).clamp(1, _totalPages);
     
     for (int i = startPage; i <= endPage; i++) {
       pageButtons.add(
