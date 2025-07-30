@@ -33,6 +33,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isFirstLoad = true;
   final UpdateService _updateService = UpdateService();
   bool _hasCheckedUpdate = false;
+  Map<String, dynamic>? _serviceHealthStatus;
+  Timer? _healthCheckTimer;
   
   @override
   void initState() {
@@ -46,6 +48,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _loadDataInitial();
     _checkForUpdate(); // 업데이트 체크 추가
     
+    // 서비스 헬스 체크 시작
+    if (Platform.isAndroid) {
+      _startHealthCheck();
+    }
+    
     // 자동 갱신 제거 - 수동 새로고침만 사용
   }
   
@@ -53,6 +60,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     // _refreshTimer?.cancel(); // 자동 갱신 제거됨
+    _healthCheckTimer?.cancel();
     super.dispose();
   }
   
@@ -306,6 +314,48 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+            // 서비스 상태 표시
+            if (Platform.isAndroid && _serviceHealthStatus != null)
+              Material(
+                color: _getHealthStatusColor().withOpacity(0.1),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.circle, 
+                        color: _getHealthStatusColor(),
+                        size: 8,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '마지막 알림: ${_getHealthStatusText()}',
+                        style: TextStyle(
+                          color: Colors.grey[700],
+                          fontSize: 12,
+                        ),
+                      ),
+                      if (_serviceHealthStatus!['queueSize'] as int > 0) ...[
+                        const SizedBox(width: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '대기: ${_serviceHealthStatus!['queueSize']}',
+                            style: TextStyle(
+                              color: AppTheme.primaryColor,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _loadDataInitial,
@@ -733,6 +783,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       ],
     );
+  }
+  
+  void _startHealthCheck() {
+    _checkServiceHealth(); // 즉시 체크
+    // 30초마다 체크
+    _healthCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _checkServiceHealth();
+    });
+  }
+  
+  Future<void> _checkServiceHealth() async {
+    if (!Platform.isAndroid) return;
+    
+    try {
+      final Map<dynamic, dynamic> status = await platform.invokeMethod('getServiceHealthStatus');
+      if (mounted) {
+        setState(() {
+          _serviceHealthStatus = Map<String, dynamic>.from(status);
+        });
+      }
+    } catch (e) {
+      print('Failed to get service health status: $e');
+    }
+  }
+  
+  String _getHealthStatusText() {
+    if (_serviceHealthStatus == null) return '';
+    
+    final timeSinceLastNotification = _serviceHealthStatus!['timeSinceLastNotification'] as int? ?? 0;
+    final minutes = timeSinceLastNotification ~/ 60000;
+    final isHealthy = _serviceHealthStatus!['isHealthy'] as bool? ?? true;
+    
+    if (minutes == 0) {
+      return '방금 전';
+    } else if (minutes < 60) {
+      return '$minutes분 전';
+    } else {
+      final hours = minutes ~/ 60;
+      return '$hours시간 전';
+    }
+  }
+  
+  Color _getHealthStatusColor() {
+    if (_serviceHealthStatus == null) return Colors.grey;
+    
+    final timeSinceLastNotification = _serviceHealthStatus!['timeSinceLastNotification'] as int? ?? 0;
+    final minutes = timeSinceLastNotification ~/ 60000;
+    
+    if (minutes < 5) {
+      return Colors.green;
+    } else if (minutes < 30) {
+      return Colors.orange;
+    } else {
+      return Colors.red;
+    }
   }
   
   Future<void> _checkForUpdate() async {

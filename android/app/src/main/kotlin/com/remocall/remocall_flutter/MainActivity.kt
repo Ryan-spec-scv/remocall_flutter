@@ -49,15 +49,24 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         
+        // LogManager 초기화
+        val logManager = LogManager.getInstance(this)
+        
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         testMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TEST_CHANNEL)
         
         methodChannel.setMethodCallHandler { call, result ->
+            Log.d(TAG, "MethodChannel called: ${call.method}")
+            
             when (call.method) {
                 "checkNotificationPermission" -> {
                     // Check notification listener permission (NOT notification display permission)
                     val isEnabled = isNotificationListenerEnabled()
                     Log.d(TAG, "[MethodChannel] checkNotificationPermission result: $isEnabled")
+                    
+                    // 권한 상태 로깅
+                    logManager.logServiceLifecycle("NOTIFICATION_PERMISSION_CHECK", "Enabled: $isEnabled")
+                    
                     result.success(isEnabled)
                 }
                 "requestNotificationPermission" -> {
@@ -188,11 +197,37 @@ class MainActivity : FlutterActivity() {
                 "isAccessibilityServiceEnabled" -> {
                     val isEnabled = isAccessibilityServiceEnabled()
                     Log.d(TAG, "Accessibility service enabled: $isEnabled")
+                    
+                    // 접근성 서비스 상태 로깅
+                    logManager.logServiceLifecycle("ACCESSIBILITY_SERVICE_CHECK", "Enabled: $isEnabled")
+                    
                     result.success(isEnabled)
                 }
                 "openAccessibilitySettings" -> {
                     openAccessibilitySettings()
                     result.success(true)
+                }
+                "getServiceHealthStatus" -> {
+                    try {
+                        val healthPrefs = getSharedPreferences("NotificationHealth", Context.MODE_PRIVATE)
+                        val lastNotificationTime = healthPrefs.getLong("last_any_notification", 0)
+                        val lastHealthCheck = healthPrefs.getLong("last_health_check", 0)
+                        val isHealthy = healthPrefs.getBoolean("is_healthy", true)
+                        val queueSize = healthPrefs.getInt("queue_size", 0)
+                        
+                        val status = mapOf(
+                            "lastNotificationTime" to lastNotificationTime,
+                            "lastHealthCheck" to lastHealthCheck,
+                            "isHealthy" to isHealthy,
+                            "queueSize" to queueSize,
+                            "timeSinceLastNotification" to (System.currentTimeMillis() - lastNotificationTime)
+                        )
+                        
+                        result.success(status)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error getting service health status", e)
+                        result.error("HEALTH_STATUS_ERROR", e.message, null)
+                    }
                 }
                 else -> {
                     result.notImplemented()

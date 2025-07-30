@@ -17,7 +17,7 @@ class NotificationServiceWatchdog : JobService() {
     companion object {
         private const val TAG = "ServiceWatchdog"
         private const val JOB_ID = 9999
-        private const val CHECK_INTERVAL = 10 * 1000L // 10초마다 확인 (배터리 걱정 없이 최대 안정성)
+        private const val CHECK_INTERVAL = 10 * 1000L // 10초마다 확인
         
         fun scheduleWatchdog(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -70,7 +70,7 @@ class NotificationServiceWatchdog : JobService() {
     }
     
     override fun onStartJob(params: JobParameters?): Boolean {
-        Log.d(TAG, "🔍 Watchdog job started - Checking NotificationListener status")
+        Log.d(TAG, "🔍 Watchdog job started - Intelligent health check")
         
         try {
             // NotificationListener 권한 확인
@@ -81,20 +81,84 @@ class NotificationServiceWatchdog : JobService() {
                 return false
             }
             
-            // NotificationService 재시작 시도
-            Log.d(TAG, "🔄 Attempting to restart NotificationService")
-            val intent = Intent(this, NotificationService::class.java)
+            // 헬스체크 상태 확인
+            val healthPrefs = getSharedPreferences("NotificationHealth", Context.MODE_PRIVATE)
+            val lastNotificationTime = healthPrefs.getLong("last_any_notification", 0)
+            val lastHealthCheck = healthPrefs.getLong("last_health_check", 0)
+            val isHealthy = healthPrefs.getBoolean("is_healthy", true)
             
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
+            val timeSinceLastNotification = System.currentTimeMillis() - lastNotificationTime
+            val timeSinceLastHealthCheck = System.currentTimeMillis() - lastHealthCheck
+            
+            Log.d(TAG, "Last notification: ${timeSinceLastNotification/1000}s ago")
+            Log.d(TAG, "Last health check: ${timeSinceLastHealthCheck/1000}s ago")
+            Log.d(TAG, "Service healthy: $isHealthy")
+            
+            // 지능형 재시작 조건
+            val shouldRestart = when {
+                // 3분 이상 알림이 없고, 헬스체크도 2분 이상 없으면
+                timeSinceLastNotification > 180000 && timeSinceLastHealthCheck > 120000 -> {
+                    Log.w(TAG, "⚠️ No notifications for 3+ minutes AND no health check for 2+ minutes")
+                    true
+                }
+                // 헬스체크가 unhealthy로 표시되면
+                !isHealthy && timeSinceLastHealthCheck < 120000 -> {
+                    Log.w(TAG, "⚠️ Service marked as unhealthy")
+                    true
+                }
+                // 5분 이상 헬스체크가 없으면 (서비스가 죽었을 가능성)
+                timeSinceLastHealthCheck > 300000 -> {
+                    Log.w(TAG, "⚠️ No health check for 5+ minutes - service might be dead")
+                    true
+                }
+                else -> {
+                    Log.d(TAG, "✅ Service appears healthy, no restart needed")
+                    false
+                }
             }
             
-            Log.d(TAG, "✅ NotificationService restart attempted")
+            if (shouldRestart) {
+                // 서비스 실행 상태 확인
+                val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                val runningServices = activityManager.getRunningServices(Integer.MAX_VALUE)
+                val isServiceRunning = runningServices.any { 
+                    it.service.className == NotificationService::class.java.name 
+                }
+                
+                if (isServiceRunning) {
+                    // 서비스가 실행 중이면 rebind 시도
+                    Log.d(TAG, "🔄 Service is running but unhealthy - attempting rebind")
+                    val rebindIntent = Intent(this, NotificationService::class.java)
+                    rebindIntent.action = "REBIND"
+                    startService(rebindIntent)
+                } else {
+                    // 서비스가 죽었으면 재시작
+                    Log.d(TAG, "🔄 Service is not running - starting new instance")
+                    val intent = Intent(this, NotificationService::class.java)
+                    
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                }
+                
+                Log.d(TAG, "✅ Service recovery attempted")
+            }
             
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error in watchdog job", e)
+            // 에러 발생 시에도 안전하게 서비스 재시작 시도
+            try {
+                val intent = Intent(this, NotificationService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
+                }
+            } catch (restartError: Exception) {
+                Log.e(TAG, "Failed to restart service after error", restartError)
+            }
         }
         
         // Job 완료

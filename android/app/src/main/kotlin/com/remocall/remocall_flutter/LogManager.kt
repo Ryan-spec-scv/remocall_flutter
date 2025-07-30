@@ -50,6 +50,14 @@ class LogManager(private val context: Context) {
         
         // 매 시간마다 GitHub 업로드 타이머 설정
         scheduleHourlyUpload()
+        
+        // 주기적으로 오래된 로그 정리
+        scope.launch {
+            while (isActive) {
+                cleanOldLogs()
+                delay(24 * 60 * 60 * 1000L) // 하루에 한 번
+            }
+        }
     }
     
     // 서비스 생명주기 로그
@@ -146,6 +154,109 @@ class LogManager(private val context: Context) {
         writeLog(log)
     }
     
+    // 큐 처리 시작/완료 로그
+    fun logQueueProcessing(event: String, queueSize: Int, details: String = "") {
+        val log = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("type", "QUEUE_PROCESSING")
+            put("event", event) // "START", "COMPLETE", "ITEM_START", "ITEM_COMPLETE", "ITEM_FAILED"
+            put("queueSize", queueSize)
+            put("details", details)
+        }
+        writeLog(log)
+    }
+    
+    // 알림 파싱 상세 로그
+    fun logNotificationParsing(
+        originalMessage: String,
+        parsedAmount: String?,
+        parsedSender: String?,
+        isDeposit: Boolean,
+        parseResult: String
+    ) {
+        val log = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("type", "NOTIFICATION_PARSING")
+            put("originalMessage", originalMessage)
+            put("parsedAmount", parsedAmount ?: "null")
+            put("parsedSender", parsedSender ?: "null")
+            put("isDeposit", isDeposit)
+            put("parseResult", parseResult)
+        }
+        writeLog(log)
+    }
+    
+    // 서버 응답 상세 로그 (기존 메소드 확장)
+    fun logServerResponseDetail(
+        matchStatus: String,
+        transactionId: String?,
+        depositId: String?,
+        errorDetail: String?
+    ) {
+        val log = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("type", "SERVER_RESPONSE_DETAIL")
+            put("matchStatus", matchStatus)
+            put("transactionId", transactionId ?: "null")
+            put("depositId", depositId ?: "null")
+            put("errorDetail", errorDetail ?: "null")
+        }
+        writeLog(log)
+    }
+    
+    // 에러 로그 (스택 트레이스 포함)
+    fun logError(location: String, error: Exception, context: String = "") {
+        val log = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("type", "ERROR")
+            put("location", location)
+            put("errorMessage", error.message ?: "Unknown error")
+            put("errorClass", error.javaClass.simpleName)
+            put("stackTrace", error.stackTraceToString())
+            put("context", context)
+        }
+        writeLog(log)
+    }
+    
+    // 서비스 헬스체크 로그
+    fun logHealthCheck(
+        lastNotificationTime: Long,
+        isServiceRunning: Boolean,
+        hasNotificationPermission: Boolean,
+        queueSize: Int
+    ) {
+        val log = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("type", "HEALTH_CHECK")
+            put("lastNotificationTime", lastNotificationTime)
+            put("timeSinceLastNotification", System.currentTimeMillis() - lastNotificationTime)
+            put("isServiceRunning", isServiceRunning)
+            put("hasNotificationPermission", hasNotificationPermission)
+            put("queueSize", queueSize)
+        }
+        writeLog(log)
+    }
+    
+    // 큐 처리 시간 측정 로그
+    fun logQueueItemTiming(
+        notificationId: String,
+        startTime: Long,
+        endTime: Long,
+        success: Boolean,
+        retryCount: Int
+    ) {
+        val processingTime = endTime - startTime
+        val log = JSONObject().apply {
+            put("timestamp", System.currentTimeMillis())
+            put("type", "QUEUE_ITEM_TIMING")
+            put("notificationId", notificationId)
+            put("processingTimeMs", processingTime)
+            put("success", success)
+            put("retryCount", retryCount)
+        }
+        writeLog(log)
+    }
+    
     private fun writeLog(logData: JSONObject) {
         scope.launch {
             try {
@@ -154,6 +265,13 @@ class LogManager(private val context: Context) {
                 
                 if (currentLogFile?.name != logFileName) {
                     currentLogFile = File(logDir, logFileName)
+                }
+                
+                // 파일 크기 체크 (10MB 제한)
+                if (currentLogFile!!.exists() && currentLogFile!!.length() > 10 * 1024 * 1024) {
+                    Log.w(TAG, "Log file size exceeds 10MB, creating new file")
+                    val timestamp = System.currentTimeMillis()
+                    currentLogFile = File(logDir, "log_${currentHour}_$timestamp.json")
                 }
                 
                 // 로그 추가 (한 줄에 하나의 JSON)
@@ -172,7 +290,7 @@ class LogManager(private val context: Context) {
     private fun scheduleHourlyUpload() {
         scope.launch {
             while (isActive) {
-                delay(3600000) // 1시간
+                delay(60000) // 1분 (추후 1시간으로 변경 예정)
                 uploadToGitHub()
             }
         }
@@ -190,8 +308,13 @@ class LogManager(private val context: Context) {
                 
                 // 매장 코드 가져오기
                 val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                Log.d(TAG, "Reading shop code from SharedPreferences...")
                 val shopCode = prefs.getString("flutter.shop_code", "unknown") ?: "unknown"
-                Log.d(TAG, "Shop code: $shopCode")
+                Log.d(TAG, "Shop code from preferences: $shopCode")
+                
+                // 다른 키 값들도 확인 (디버깅용)
+                val allKeys = prefs.all.keys
+                Log.d(TAG, "All SharedPreferences keys: ${allKeys.joinToString(", ")}")
                 
                 // 로그 디렉토리 확인
                 Log.d(TAG, "Log directory: ${logDir.absolutePath}")
@@ -359,10 +482,17 @@ class LogManager(private val context: Context) {
         scope.launch {
             try {
                 val cutoffTime = System.currentTimeMillis() - (daysToKeep * 24 * 60 * 60 * 1000L)
-                logDir.listFiles()?.forEach { file ->
-                    if (file.lastModified() < cutoffTime) {
+                var totalSize = 0L
+                val files = logDir.listFiles()?.sortedByDescending { it.lastModified() } ?: emptyList()
+                
+                files.forEach { file ->
+                    totalSize += file.length()
+                    
+                    // 7일 이상 된 파일이거나 전체 크기가 100MB를 초과하면 삭제
+                    if (file.lastModified() < cutoffTime || totalSize > 100 * 1024 * 1024) {
                         file.delete()
-                        Log.d(TAG, "Deleted old log file: ${file.name}")
+                        Log.d(TAG, "Deleted log file: ${file.name}")
+                        totalSize -= file.length()
                     }
                 }
             } catch (e: Exception) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:remocall_flutter/providers/auth_provider.dart';
 import 'package:remocall_flutter/screens/auth/pin_login_screen.dart';
@@ -6,6 +7,7 @@ import 'package:remocall_flutter/screens/settings/notification_permission_screen
 import 'package:remocall_flutter/screens/settings/test_token_screen.dart';
 import 'package:remocall_flutter/utils/theme.dart';
 import 'package:remocall_flutter/config/app_config.dart';
+import 'dart:io';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -126,6 +128,15 @@ class SettingsScreen extends StatelessWidget {
                 );
               },
             ),
+            if (Platform.isAndroid)
+              _buildSettingItem(
+                icon: Icons.upload_outlined,
+                title: '로그 즉시 업로드',
+                subtitle: 'GitHub로 로그 파일 전송',
+                onTap: () async {
+                  _showUploadDialog(context);
+                },
+              ),
             
             const Divider(),
             
@@ -176,6 +187,57 @@ class SettingsScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  void _showUploadDialog(BuildContext context) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('로그 업로드'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('로그 파일을 GitHub로 업로드하는 중...'),
+            ],
+          ),
+        );
+      },
+    );
+
+    try {
+      if (Platform.isAndroid) {
+        const platform = MethodChannel('com.remocall/notifications');
+        final result = await platform.invokeMethod('triggerLogUpload');
+        
+        if (context.mounted) {
+          Navigator.pop(context);
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('로그 업로드가 시작되었습니다'),
+              backgroundColor: AppTheme.successColor,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.pop(context);
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('로그 업로드 실패: ${e.toString()}'),
+            backgroundColor: AppTheme.errorColor,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildSettingItem({

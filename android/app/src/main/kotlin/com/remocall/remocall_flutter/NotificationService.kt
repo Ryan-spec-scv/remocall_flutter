@@ -42,6 +42,8 @@ class NotificationService : NotificationListenerService() {
         private const val NOTIFICATION_CHANNEL_ID = "depositpro_notification_listener"
         private const val NOTIFICATION_ID = 1001
         private const val WAKE_LOCK_TAG = "SnapPay::NotificationListener"
+        private const val MAX_TOKEN_REFRESH_RETRY = 20 // 토큰 갱신 최대 재시도 회수
+        private const val MAX_QUEUE_ITEM_RETRY = 20 // 큐 아이템 최대 재시도 회수
         
         // 타임스탬프 생성 함수 (UTC 기준)
         fun getKSTTimestamp(): Long {
@@ -50,7 +52,7 @@ class NotificationService : NotificationListenerService() {
         }
         
         // 토큰 갱신 함수
-        fun refreshAccessToken(context: Context, refreshToken: String): Boolean {
+        fun refreshAccessToken(context: Context, refreshToken: String, retryCount: Int = 0): Boolean {
             try {
                 Log.d(TAG, "Attempting to refresh access token...")
                 
@@ -109,7 +111,7 @@ class NotificationService : NotificationListenerService() {
                     LogManager.getInstance(context).logTokenRefresh(false, "Status code: $responseCode")
                     return false
                 } finally {
-                    connection.disconnect()
+                    connection?.disconnect()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error refreshing token: ${e.message}", e)
@@ -123,7 +125,8 @@ class NotificationService : NotificationListenerService() {
             context: Context,
             message: String,
             accessToken: String,
-            onResult: (Boolean, String) -> Unit
+            onResult: (Boolean, String) -> Unit,
+            tokenRefreshCount: Int = 0
         ) {
             try {
                 Log.d(TAG, "=== SEND NOTIFICATION TO SERVER (Common) ===")
@@ -194,6 +197,20 @@ class NotificationService : NotificationListenerService() {
                             val data = jsonResponse.getJSONObject("data")
                             val matchStatus = data.getString("match_status")
                             
+                            // 서버 응답 상세 로깅
+                            val transactionId = data.optString("transaction_id", null)
+                            val depositId = data.optString("deposit_id", null)
+                            val errorDetail = data.optString("error_detail", null)
+                            
+                            context?.let {
+                                LogManager.getInstance(it).logServerResponseDetail(
+                                    matchStatus = matchStatus,
+                                    transactionId = transactionId,
+                                    depositId = depositId,
+                                    errorDetail = errorDetail
+                                )
+                            }
+                            
                             val responseMessage = when (matchStatus) {
                                 "matched" -> "✅ 입금이 자동으로 매칭되어 거래가 완료되었습니다."
                                 "auto_created" -> "✅ 매칭되는 거래가 없어 새 거래를 자동으로 생성했습니다."
@@ -205,6 +222,9 @@ class NotificationService : NotificationListenerService() {
                             onResult(success && matchStatus != "failed", responseMessage)
                         } catch (e: Exception) {
                             Log.e(TAG, "Error parsing response: ${e.message}")
+                            context?.let {
+                                LogManager.getInstance(it).logError("sendNotificationToServer.parsing", e, "Response: $response")
+                            }
                             onResult(true, "서버 응답 파싱 오류: ${e.message}")
                         }
                     } else if (responseCode == 401) {
@@ -215,20 +235,22 @@ class NotificationService : NotificationListenerService() {
                         val refreshToken = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                             .getString("flutter.refresh_token", null)
                         
-                        if (refreshToken != null) {
-                            val refreshSuccess = refreshAccessToken(context, refreshToken)
+                        if (refreshToken != null && tokenRefreshCount < MAX_TOKEN_REFRESH_RETRY) {
+                            val refreshSuccess = refreshAccessToken(context, refreshToken, tokenRefreshCount)
                             if (refreshSuccess) {
                                 // 토큰 갱신 성공 - 새 토큰으로 재시도
                                 val newAccessToken = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                                     .getString("flutter.access_token", null)
                                 
                                 if (newAccessToken != null) {
-                                    Log.d(TAG, "Token refreshed successfully, retrying with new token...")
+                                    Log.d(TAG, "Token refreshed successfully, retrying with new token... (attempt ${tokenRefreshCount + 1}/$MAX_TOKEN_REFRESH_RETRY)")
                                     // 재귀 호출로 새 토큰으로 다시 시도
-                                    sendNotificationToServer(context, message, newAccessToken, onResult)
+                                    sendNotificationToServer(context, message, newAccessToken, onResult, tokenRefreshCount + 1)
                                     return
                                 }
                             }
+                        } else if (tokenRefreshCount >= MAX_TOKEN_REFRESH_RETRY) {
+                            Log.e(TAG, "Token refresh retry limit reached ($MAX_TOKEN_REFRESH_RETRY)")
                         }
                         
                         // 토큰 갱신 실패
@@ -266,12 +288,18 @@ class NotificationService : NotificationListenerService() {
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Connection error: ${e.message}", e)
+                    context?.let {
+                        LogManager.getInstance(it).logError("sendNotificationToServer.connection", e, "URL: $apiUrl")
+                    }
                     onResult(false, "네트워크 오류: ${e.message}")
                 } finally {
-                    connection.disconnect()
+                    connection?.disconnect()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error in sendNotificationToServer: ${e.message}", e)
+                context?.let {
+                    LogManager.getInstance(it).logError("sendNotificationToServer.general", e, "Message: $message")
+                }
                 onResult(false, "전송 오류: ${e.message}")
             }
         }
@@ -283,9 +311,14 @@ class NotificationService : NotificationListenerService() {
     private var retryTimer: Timer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var logManager: LogManager
+    private var healthCheckTimer: Timer? = null
+    private val MAX_RECENT_NOTIFICATIONS = 50 // 메모리 사용량 제한
     
-    // 알림 전송 큐 - 순서 보장을 위한 Thread-safe 큐
-    private val notificationQueue = ConcurrentLinkedQueue<FailedNotification>()
+    @Volatile
+    private var isRunning = false
+    
+    // 큐 처리 상태만 메모리에 유지 (실제 큐는 SharedPreferences에 저장)
+    @Volatile
     private var isProcessingQueue = false
     
     // 실패한 알림 데이터 클래스
@@ -329,25 +362,35 @@ class NotificationService : NotificationListenerService() {
         super.onCreate()
         Log.d(TAG, "NotificationService created")
         
+        // 중복 실행 체크
+        if (isServiceRunning()) {
+            Log.w(TAG, "Service already running, stopping duplicate instance")
+            stopSelf()
+            return
+        }
+        
         // LogManager 초기화
         logManager = LogManager.getInstance(this)
         logManager.logServiceLifecycle("CREATED")
         
-        // WakeLock 초기화 - 최대 안정성 확보 (배터리 걱정 없음)
+        // WakeLock 초기화 - 10분 타임아웃으로 메모리 누수 방지
         try {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK, 
                 WAKE_LOCK_TAG
             ).apply {
-                acquire() // 영구적으로 유지 (timeout 없음)
-                Log.d(TAG, "Permanent WakeLock acquired for maximum stability")
+                acquire(10 * 60 * 1000L) // 10분 타임아웃
+                Log.d(TAG, "WakeLock acquired with 10 minute timeout")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to acquire WakeLock", e)
         }
         
         startRetryTimer()
+        
+        // 서비스 실행 상태 설정
+        isRunning = true
         
         // Watchdog Job 스케줄링 - 서비스 안정성 보장
         try {
@@ -362,6 +405,9 @@ class NotificationService : NotificationListenerService() {
         
         // 앱 재시작 시 기존 큐 복구
         loadQueueFromPreferences()
+        
+        // 헬스체크 타이머 시작
+        startHealthCheckTimer()
         
         // 서비스 중요도 설정
         try {
@@ -442,21 +488,7 @@ class NotificationService : NotificationListenerService() {
             Log.e(TAG, "Failed to request rebind", e)
         }
         
-        // 백업 재시작 메커니즘 (3초 후)
-        scope.launch {
-            delay(3000)
-            try {
-                Log.d(TAG, "Backup restart mechanism triggered")
-                val intent = Intent(applicationContext, NotificationService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    applicationContext.startForegroundService(intent)
-                } else {
-                    applicationContext.startService(intent)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Backup restart failed", e)
-            }
-        }
+        // 백업 재시작 제거 - Watchdog에서 처리하도록 변경
     }
     
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -464,6 +496,10 @@ class NotificationService : NotificationListenerService() {
         
         try {
             Log.d(TAG, "Notification received from: ${sbn.packageName}")
+            
+            // 모든 알림 수신 시 타임스탬프 업데이트 (헬스체크용)
+            val prefs = getSharedPreferences("NotificationHealth", Context.MODE_PRIVATE)
+            prefs.edit().putLong("last_any_notification", System.currentTimeMillis()).apply()
         
         // 카카오톡 알림 처리 (로그만 남기고 서버 전송하지 않음)
         if (sbn.packageName == "com.kakao.talk") {
@@ -557,14 +593,15 @@ class NotificationService : NotificationListenerService() {
             }
             
             recentNotifications.add(notificationKey)
-            // Clean old entries if too many
-            if (recentNotifications.size > 100) {
+            // Clean old entries if too many - 더 효율적인 방식
+            if (recentNotifications.size > MAX_RECENT_NOTIFICATIONS) {
+                val toRemove = recentNotifications.size - MAX_RECENT_NOTIFICATIONS
                 val iterator = recentNotifications.iterator()
-                repeat(50) {
-                    if (iterator.hasNext()) {
-                        iterator.next()
-                        iterator.remove()
-                    }
+                var removed = 0
+                while (iterator.hasNext() && removed < toRemove) {
+                    iterator.next()
+                    iterator.remove()
+                    removed++
                 }
             }
             
@@ -600,20 +637,10 @@ class NotificationService : NotificationListenerService() {
         }
         
         } catch (e: Exception) {
-            Log.e(TAG, "Critical error in onNotificationPosted - Service stability at risk", e)
+            Log.e(TAG, "Critical error in onNotificationPosted", e)
             logManager.logServiceLifecycle("CRITICAL_ERROR", e.message ?: "Unknown error")
-            
-            // 크리티컬 에러 발생 시 서비스 재시작
-            try {
-                val restartIntent = Intent(applicationContext, NotificationService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    applicationContext.startForegroundService(restartIntent)
-                } else {
-                    applicationContext.startService(restartIntent)
-                }
-            } catch (restartException: Exception) {
-                Log.e(TAG, "Failed to restart service after critical error", restartException)
-            }
+            // 크리티컬 에러 발생 시에도 서비스를 재시작하지 않음
+            // Watchdog이 상태를 감지하고 필요시 재시작함
         }
     }
     
@@ -765,6 +792,23 @@ class NotificationService : NotificationListenerService() {
         Log.d(TAG, "Message: $message")
         Log.d(TAG, "Is deposit notification: $isDeposit")
         
+        // 파싱 시도
+        var parsedAmount: String? = null
+        var parsedSender: String? = null
+        if (isDeposit) {
+            try {
+                // 금액 파싱
+                val amountMatch = Regex("([0-9,]+)원을").find(message)
+                parsedAmount = amountMatch?.groupValues?.get(1)
+                
+                // 보낸사람 파싱
+                val senderMatch = Regex("([가-힣a-zA-Z0-9]+)\\(").find(message)
+                parsedSender = senderMatch?.groupValues?.get(1)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing deposit details", e)
+            }
+        }
+        
         // 패턴 필터링 결과 로그
         val reason = when {
             !message.matches(depositPattern) -> "입금 패턴과 불일치"
@@ -772,6 +816,15 @@ class NotificationService : NotificationListenerService() {
             else -> "입금 알림 확인"
         }
         logManager.logPatternFilter(message, isDeposit, reason)
+        
+        // 파싱 상세 로그
+        logManager.logNotificationParsing(
+            originalMessage = message,
+            parsedAmount = parsedAmount,
+            parsedSender = parsedSender,
+            isDeposit = isDeposit,
+            parseResult = reason
+        )
         
         return isDeposit
     }
@@ -793,9 +846,11 @@ class NotificationService : NotificationListenerService() {
     }
     
     
-    // 재시도 타이머 시작
+    // 재시도 타이머 시작 - 중복 생성 방지
     private fun startRetryTimer() {
         Log.d(TAG, "Starting retry timer")
+        // 기존 타이머가 있으면 취소
+        retryTimer?.cancel()
         retryTimer = Timer()
         retryTimer?.scheduleAtFixedRate(60000, 60000) { // 1분 후 시작, 1분마다 실행
             processFailedQueue()
@@ -803,7 +858,7 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
-    // 알림을 큐에 추가
+    // 알림을 큐에 추가 (SharedPreferences만 사용)
     private fun addToQueue(sender: String, message: String, packageName: String) {
         try {
             val notification = FailedNotification(
@@ -812,13 +867,11 @@ class NotificationService : NotificationListenerService() {
                 timestamp = NotificationService.getKSTTimestamp()
             )
             
-            // 메모리 큐에 추가
-            notificationQueue.offer(notification)
-            
-            // SharedPreferences에도 저장 (앱 재시작 시 복구용)
+            // SharedPreferences에 저장
             saveFailedNotification(notification)
             
-            Log.d(TAG, "Added notification to queue. Queue size: ${notificationQueue.size}")
+            val queueSize = getFailedNotifications().size
+            Log.d(TAG, "Added notification to queue. Queue size: $queueSize")
             
             // 큐 처리가 중지되어 있다면 다시 시작
             if (!isProcessingQueue) {
@@ -829,7 +882,8 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
-    // 큐 처리 시작
+    // 큐 처리 시작 - 동기화 처리
+    @Synchronized
     private fun startQueueProcessing() {
         if (isProcessingQueue) {
             Log.d(TAG, "Queue processing already running")
@@ -842,15 +896,21 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
-    // 큐 처리 메인 로직
+    // 큐 처리 메인 로직 (SharedPreferences 기반)
     private suspend fun processQueue() {
         Log.d(TAG, "Starting queue processing")
         
-        while (isProcessingQueue && notificationQueue.isNotEmpty()) {
-            val notification = notificationQueue.peek()
-            if (notification == null) {
-                continue
+        while (isProcessingQueue) {
+            val notifications = getFailedNotifications()
+            if (notifications.isEmpty()) {
+                Log.d(TAG, "Queue is empty, stopping processing")
+                break
             }
+            
+            logManager.logQueueProcessing("START", notifications.size)
+            
+            // 첫 번째 알림 처리
+            val notification = notifications.firstOrNull() ?: break
             
             // 재시도 대기 시간 확인
             val delayTime = getRetryDelay(notification.retryCount)
@@ -862,26 +922,40 @@ class NotificationService : NotificationListenerService() {
             }
             
             Log.d(TAG, "Processing notification from queue (attempt ${notification.retryCount + 1})")
+            logManager.logQueueProcessing("ITEM_START", notificationQueue.size, "ID: ${notification.id}, Retry: ${notification.retryCount}")
+            
+            val startTime = System.currentTimeMillis()
             
             // 전송 시도
             val success = sendNotificationToServer(notification)
             
+            val endTime = System.currentTimeMillis()
+            logManager.logQueueItemTiming(notification.id, startTime, endTime, success, notification.retryCount)
+            
             if (success) {
                 // 성공: 큐에서 제거
-                notificationQueue.poll()
                 removeFromQueue(notification.id)
                 Log.d(TAG, "Notification sent successfully and removed from queue")
+                val remainingSize = getFailedNotifications().size
+                logManager.logQueueProcessing("ITEM_COMPLETE", remainingSize, "ID: ${notification.id}")
             } else {
-                // 실패: 큐 끝으로 이동
-                notificationQueue.poll()
-                val updatedNotification = notification.copy(
-                    retryCount = notification.retryCount + 1,
-                    lastRetryTime = System.currentTimeMillis()
-                )
-                notificationQueue.offer(updatedNotification)
-                updateNotificationInQueue(updatedNotification)
-                
-                Log.d(TAG, "Notification failed, moved to end of queue. Queue size: ${notificationQueue.size}")
+                // 실패: 재시도 제한 확인
+                if (notification.retryCount < MAX_QUEUE_ITEM_RETRY) {
+                    val updatedNotification = notification.copy(
+                        retryCount = notification.retryCount + 1,
+                        lastRetryTime = System.currentTimeMillis()
+                    )
+                    updateNotificationInQueue(updatedNotification)
+                    
+                    Log.d(TAG, "Notification failed, updated retry count. Retry ${updatedNotification.retryCount}/$MAX_QUEUE_ITEM_RETRY")
+                    val queueSize = getFailedNotifications().size
+                    logManager.logQueueProcessing("ITEM_FAILED", queueSize, "ID: ${notification.id}, New retry count: ${updatedNotification.retryCount}")
+                } else {
+                    // 최대 재시도 회수 초과 - SharedPreferences에는 유지
+                    Log.w(TAG, "Notification ${notification.id} exceeded max retry count. Keeping in storage but not retrying.")
+                    val queueSize = getFailedNotifications().size
+                    logManager.logQueueProcessing("ITEM_MAX_RETRY", queueSize, "ID: ${notification.id}")
+                }
                 
                 // 짧은 대기
                 delay(1000)
@@ -889,7 +963,9 @@ class NotificationService : NotificationListenerService() {
         }
         
         isProcessingQueue = false
-        Log.d(TAG, "Queue processing stopped. Queue empty: ${notificationQueue.isEmpty()}")
+        val finalSize = getFailedNotifications().size
+        Log.d(TAG, "Queue processing stopped. Queue size: $finalSize")
+        logManager.logQueueProcessing("COMPLETE", finalSize)
     }
     
     // 재시도 대기 시간 계산
@@ -977,18 +1053,15 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
-    // 앱 재시작 시 SharedPreferences에서 큐 복구
+    // 앱 재시작 시 큐 처리 시작 (이미 SharedPreferences에 저장되어 있음)
     private fun loadQueueFromPreferences() {
         try {
             val notifications = getFailedNotifications()
             if (notifications.isNotEmpty()) {
-                Log.d(TAG, "Loading ${notifications.size} notifications from preferences to queue")
-                notifications.forEach { notification ->
-                    notificationQueue.offer(notification)
-                }
+                Log.d(TAG, "Found ${notifications.size} notifications in storage")
                 
                 // 큐 처리가 중지되어 있다면 다시 시작
-                if (!isProcessingQueue && notificationQueue.isNotEmpty()) {
+                if (!isProcessingQueue) {
                     startQueueProcessing()
                 }
             }
@@ -1008,8 +1081,8 @@ class NotificationService : NotificationListenerService() {
                         PowerManager.PARTIAL_WAKE_LOCK, 
                         WAKE_LOCK_TAG
                     ).apply {
-                        acquire() // 영구적으로 유지
-                        Log.d(TAG, "WakeLock re-acquired for maximum stability")
+                        acquire(10 * 60 * 1000L) // 10분 타임아웃
+                        Log.d(TAG, "WakeLock re-acquired with 10 minute timeout")
                     }
                 } else {
                     Log.d(TAG, "WakeLock still held - no action needed")
@@ -1020,7 +1093,8 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
-    // 실패한 알림을 큐에 저장
+    // 실패한 알림을 큐에 저장 - 동기화 처리
+    @Synchronized
     private fun saveFailedNotification(notification: FailedNotification) {
         try {
             val prefs = getSharedPreferences("NotificationQueue", Context.MODE_PRIVATE)
@@ -1029,9 +1103,21 @@ class NotificationService : NotificationListenerService() {
             val queueArray = JSONArray(existingQueue)
             queueArray.put(notification.toJson())
             
-            prefs.edit()
-                .putString("failed_notifications", queueArray.toString())
-                .apply()
+            // 큐 크기 제한 (1000개)
+            if (queueArray.length() > 1000) {
+                Log.w(TAG, "Queue size exceeds 1000, removing oldest items")
+                val newArray = JSONArray()
+                for (i in queueArray.length() - 1000 until queueArray.length()) {
+                    newArray.put(queueArray.getJSONObject(i))
+                }
+                prefs.edit()
+                    .putString("failed_notifications", newArray.toString())
+                    .apply()
+            } else {
+                prefs.edit()
+                    .putString("failed_notifications", queueArray.toString())
+                    .apply()
+            }
                 
             Log.d(TAG, "Saved failed notification to queue. Queue size: ${queueArray.length()}")
             
@@ -1048,7 +1134,8 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
-    // 큐에서 실패한 알림들 가져오기
+    // 큐에서 실패한 알림들 가져오기 - 동기화 처리
+    @Synchronized
     private fun getFailedNotifications(): List<FailedNotification> {
         return try {
             val prefs = getSharedPreferences("NotificationQueue", Context.MODE_PRIVATE)
@@ -1067,7 +1154,8 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
-    // 큐에서 특정 알림 제거
+    // 큐에서 특정 알림 제거 - 동기화 처리
+    @Synchronized
     private fun removeFromQueue(notificationId: String) {
         try {
             val prefs = getSharedPreferences("NotificationQueue", Context.MODE_PRIVATE)
@@ -1092,10 +1180,13 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
-    // 재시도 가능 여부 확인 - 제한 없이 항상 재시도
+    // 재시도 가능 여부 확인 - 최대 20회까지만 재시도
     private fun shouldRetry(notification: FailedNotification): Boolean {
-        // 제한 없이 계속 재시도
-        Log.d(TAG, "Notification ${notification.id} will be retried (attempt ${notification.retryCount + 1})")
+        if (notification.retryCount >= MAX_QUEUE_ITEM_RETRY) {
+            Log.w(TAG, "Notification ${notification.id} reached max retry limit ($MAX_QUEUE_ITEM_RETRY)")
+            return false
+        }
+        Log.d(TAG, "Notification ${notification.id} will be retried (attempt ${notification.retryCount + 1}/$MAX_QUEUE_ITEM_RETRY)")
         return true
     }
     
@@ -1190,13 +1281,15 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
-    // 큐에서 알림 업데이트
+    // 큐에서 알림 업데이트 - 동기화 처리
+    @Synchronized
     private fun updateNotificationInQueue(notification: FailedNotification) {
         removeFromQueue(notification.id)
         saveFailedNotification(notification)
     }
     
-    // 입금 알림이 아닌 항목들을 큐에서 제거
+    // 입금 알림이 아닌 항목들을 큐에서 제거 - 동기화 처리
+    @Synchronized
     fun cleanFailedQueue() {
         try {
             Log.d(TAG, "=== CLEANING FAILED QUEUE ===")
@@ -1301,11 +1394,97 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
+    // 헬스체크 타이머 시작 - 중복 생성 방지
+    private fun startHealthCheckTimer() {
+        Log.d(TAG, "Starting health check timer")
+        // 기존 타이머가 있으면 취소
+        healthCheckTimer?.cancel()
+        healthCheckTimer = Timer()
+        healthCheckTimer?.scheduleAtFixedRate(60000, 60000) { // 1분마다 실행
+            performHealthCheck()
+        }
+    }
+    
+    // 헬스체크 수행
+    private fun performHealthCheck() {
+        try {
+            val prefs = getSharedPreferences("NotificationHealth", Context.MODE_PRIVATE)
+            val lastNotificationTime = prefs.getLong("last_any_notification", 0)
+            val timeSinceLastNotification = System.currentTimeMillis() - lastNotificationTime
+            
+            // 알림 권한 확인
+            val hasPermission = isNotificationListenerEnabled()
+            
+            // 서비스 상태 확인
+            val isServiceRunning = true // 이 메소드가 실행되고 있다면 서비스는 실행 중
+            
+            val queueSize = getFailedNotifications().size
+            
+            // 헬스체크 로그
+            logManager.logHealthCheck(
+                lastNotificationTime = lastNotificationTime,
+                isServiceRunning = isServiceRunning,
+                hasNotificationPermission = hasPermission,
+                queueSize = queueSize
+            )
+            
+            Log.d(TAG, "Health check - Last notification: ${timeSinceLastNotification}ms ago, Permission: $hasPermission, Queue: $queueSize")
+            
+            // 권한이 없어졌다면 재연결 시도
+            if (!hasPermission) {
+                Log.e(TAG, "Notification permission lost! Attempting to rebind...")
+                requestRebind(null)
+            }
+            
+            val queueSize = getFailedNotifications().size
+            
+            // 자가 진단 결과 저장 (MainActivity에서 읽을 수 있도록)
+            prefs.edit()
+                .putLong("last_health_check", System.currentTimeMillis())
+                .putBoolean("is_healthy", hasPermission && timeSinceLastNotification < 300000) // 5분 이내
+                .putInt("queue_size", queueSize)
+                .apply()
+                
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in health check", e)
+            logManager.logError("performHealthCheck", e)
+        }
+    }
+    
+    // 알림 리스너 권한 확인
+    private fun isNotificationListenerEnabled(): Boolean {
+        try {
+            val enabledListeners = Settings.Secure.getString(
+                contentResolver,
+                "enabled_notification_listeners"
+            )
+            val packageName = packageName
+            return enabledListeners?.contains(packageName) == true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking notification listener permission", e)
+            return false
+        }
+    }
+    
+    // 서비스 중복 실행 확인
+    private fun isServiceRunning(): Boolean {
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        for (service in manager.getRunningServices(Integer.MAX_VALUE)) {
+            if (NotificationService::class.java.name == service.service.className && 
+                service.pid != android.os.Process.myPid()) {
+                return true
+            }
+        }
+        return false
+    }
+    
     override fun onDestroy() {
         super.onDestroy()
+        isRunning = false
         logManager.logServiceLifecycle("DESTROYED")
         
         retryTimer?.cancel()
+        healthCheckTimer?.cancel()
         scope.cancel()
         // Wake lock 해제
         wakeLock?.let {
@@ -1315,20 +1494,7 @@ class NotificationService : NotificationListenerService() {
         }
         Log.d(TAG, "NotificationService destroyed")
         
-        // 서비스가 종료되면 다시 시작하도록 알람 설정
-        val restartIntent = Intent(applicationContext, NotificationService::class.java)
-        val restartPendingIntent = PendingIntent.getService(
-            applicationContext,
-            1,
-            restartIntent,
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
-        alarmManager.set(
-            android.app.AlarmManager.ELAPSED_REALTIME,
-            android.os.SystemClock.elapsedRealtime() + 500, // 0.5초 후 즉시 재시작 (배터리 걱정 없음)
-            restartPendingIntent
-        )
+        // 자동 재시작 제거 - Watchdog에서 관리하도록 변경
+        // 서비스가 정상적으로 종료되면 자동으로 재시작하지 않음
     }
 }
