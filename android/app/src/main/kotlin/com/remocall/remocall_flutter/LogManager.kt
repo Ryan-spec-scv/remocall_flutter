@@ -501,6 +501,33 @@ class LogManager(private val context: Context) {
         }
     }
     
+    // 최근 로그 가져오기 (테스트용)
+    fun getRecentLogs(limit: Int = 50): String {
+        return try {
+            val allLogs = mutableListOf<JSONObject>()
+            
+            // 모든 로그 파일에서 로그 읽기
+            getLogFiles().take(3).forEach { file -> // 최신 3개 파일만
+                val fileLogs = readLogFile(file.name)
+                allLogs.addAll(fileLogs)
+            }
+            
+            // 시간순으로 정렬하고 최근 limit개만 가져오기 
+            val recentLogs = allLogs
+                .sortedByDescending { it.optLong("timestamp", 0) }
+                .take(limit)
+            
+            // JSON 배열로 변환
+            val jsonArray = JSONArray()
+            recentLogs.forEach { jsonArray.put(it) }
+            
+            jsonArray.toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting recent logs", e)
+            "[]"
+        }
+    }
+    
     fun destroy() {
         scope.cancel()
     }

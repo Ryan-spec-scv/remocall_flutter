@@ -17,6 +17,7 @@ import 'package:remocall_flutter/widgets/dashboard_summary.dart';
 import 'package:remocall_flutter/services/update_service.dart';
 import 'package:intl/intl.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:remocall_flutter/config/app_config.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -247,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     
     return Scaffold(
       body: _buildHomeTab(),
-      floatingActionButton: shop?.code == '0701' 
+      floatingActionButton: !AppConfig.isProduction 
         ? FloatingActionButton(
             onPressed: () {
               Navigator.push(

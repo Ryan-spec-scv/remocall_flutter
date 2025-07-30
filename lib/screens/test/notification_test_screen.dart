@@ -4,11 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:remocall_flutter/providers/notification_provider.dart';
-import 'package:remocall_flutter/providers/transaction_provider.dart';
 import 'package:remocall_flutter/utils/theme.dart';
 import 'package:remocall_flutter/utils/datetime_utils.dart';
 import 'package:remocall_flutter/screens/test/log_viewer_screen.dart';
-import 'package:intl/intl.dart';
 
 class NotificationTestScreen extends StatefulWidget {
   const NotificationTestScreen({super.key});
@@ -21,27 +19,105 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
   static const platform = MethodChannel('com.remocall/notifications');
   bool _isServiceRunning = false;
   bool _hasPermission = false;
-  // Timer? _statusTimer; // 자동 갱신 제거됨
   final TextEditingController _testMessageController = TextEditingController();
-  Map<String, dynamic>? _failedQueue;
+  
+  // 추가된 상태 변수들
+  Map<String, dynamic>? _serviceHealth;
+  List<dynamic> _recentLogs = [];
+  List<dynamic> _failedQueueItems = [];
+  Timer? _refreshTimer;
+  bool _autoRefresh = true;
 
   @override
   void initState() {
     super.initState();
-    _checkStatus();
     
     // 기본 테스트 메시지 설정
     _testMessageController.text = '이현우(이*우)님이 10,000원을 보냈어요.';
     
-    // 자동 갱신 제거 - 수동 새로고침만 사용
-    _checkStatus(); // 초기 상태만 확인
+    // 초기 데이터 로드
+    _loadAllData();
+    
+    // 자동 새로고침 시작
+    _startAutoRefresh();
   }
   
   @override
   void dispose() {
-    // _statusTimer?.cancel(); // 자동 갱신 제거됨
+    _refreshTimer?.cancel();
     _testMessageController.dispose();
     super.dispose();
+  }
+
+  void _startAutoRefresh() {
+    if (_autoRefresh) {
+      _refreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+        _loadAllData();
+      });
+    }
+  }
+  
+  void _toggleAutoRefresh() {
+    setState(() {
+      _autoRefresh = !_autoRefresh;
+    });
+    
+    if (_autoRefresh) {
+      _startAutoRefresh();
+    } else {
+      _refreshTimer?.cancel();
+    }
+  }
+  
+  Future<void> _loadAllData() async {
+    await Future.wait([
+      _loadServiceHealth(),
+      _loadRecentLogs(),
+      _loadFailedQueue(),
+      _checkStatus(),
+    ]);
+  }
+  
+  Future<void> _loadServiceHealth() async {
+    try {
+      final healthJson = await platform.invokeMethod('getServiceHealthInfo');
+      final health = jsonDecode(healthJson);
+      if (mounted) {
+        setState(() {
+          _serviceHealth = health;
+        });
+      }
+    } catch (e) {
+      print('Error loading service health: $e');
+    }
+  }
+  
+  Future<void> _loadRecentLogs() async {
+    try {
+      final logsJson = await platform.invokeMethod('getRecentNotificationLogs');
+      final logs = jsonDecode(logsJson);
+      if (mounted) {
+        setState(() {
+          _recentLogs = logs is List ? logs : [];
+        });
+      }
+    } catch (e) {
+      print('Error loading recent logs: $e');
+    }
+  }
+  
+  Future<void> _loadFailedQueue() async {
+    try {
+      final queueJson = await platform.invokeMethod('getFailedQueueInfo');
+      final queue = jsonDecode(queueJson);
+      if (mounted) {
+        setState(() {
+          _failedQueueItems = queue is List ? queue : [];
+        });
+      }
+    } catch (e) {
+      print('Error loading failed queue: $e');
+    }
   }
 
   Future<void> _checkStatus() async {
@@ -49,420 +125,399 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
       final isRunning = await platform.invokeMethod('isServiceRunning');
       final hasPermission = await platform.invokeMethod('checkNotificationPermission');
       
-      setState(() {
-        _isServiceRunning = isRunning ?? false;
-        _hasPermission = hasPermission ?? false;
-      });
-      
-      // 실패 큐 정보도 함께 가져오기
-      await _loadFailedQueue();
-    } on PlatformException catch (e) {
-      print('Error checking status: ${e.message}');
-    }
-  }
-  
-  Future<void> _loadFailedQueue() async {
-    try {
-      final String queueJson = await platform.invokeMethod('getFailedQueue');
-      final queue = jsonDecode(queueJson);
-      setState(() {
-        _failedQueue = queue;
-      });
-    } on PlatformException catch (e) {
-      print('Error loading failed queue: ${e.message}');
+      if (mounted) {
+        setState(() {
+          _isServiceRunning = isRunning ?? false;
+          _hasPermission = hasPermission ?? false;
+        });
+      }
+    } catch (e) {
+      print('Error checking status: $e');
     }
   }
 
   Future<void> _sendTestNotification() async {
-    // 사용자가 입력한 메시지 가져오기
-    final testMessage = _testMessageController.text.trim();
-    
-    if (testMessage.isEmpty) {
+    final message = _testMessageController.text.trim();
+    if (message.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('테스트 메시지를 입력해주세요'),
-          backgroundColor: Colors.red,
-        ),
+        const SnackBar(content: Text('테스트 메시지를 입력하세요')),
       );
       return;
     }
-    
+
     try {
-      // Native 코드에서 테스트 알림만 생성 (서버 전송은 NotificationService가 처리)
-      final result = await platform.invokeMethod('sendTestWebhook', {
-        'message': testMessage,
-      });
-      
-      // 알림 생성 결과 처리
-      final success = result['success'] as bool;
-      final responseMessage = result['message'] as String;
-      
-      // 테스트 알림 생성 성공 메시지 표시
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(responseMessage),
-          backgroundColor: success ? AppTheme.successColor : Colors.red,
-        ),
-      );
-      
-      // 알림이 NotificationService에 의해 감지되고 서버로 전송될 것임
-      print('Test notification created, waiting for NotificationService to detect and send...');
+      await platform.invokeMethod('sendTestWebhook', {'message': message});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('테스트 알림을 전송했습니다'),
+            backgroundColor: AppTheme.successColor,
+          ),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('테스트 실패: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('테스트 실패: $e'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final notificationProvider = Provider.of<NotificationProvider>(context);
-    final transactionProvider = Provider.of<TransactionProvider>(context);
-    final notifications = notificationProvider.notifications;
-    final provider = notificationProvider; // for easier access
-    // dateFormatter removed - will use DateTimeUtils directly
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('알림 파싱 테스트'),
-        backgroundColor: AppTheme.primaryColor,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.article),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const LogViewerScreen(),
-                ),
-              );
-            },
-            tooltip: '시스템 로그',
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // 상태 카드
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: Theme.of(context).brightness == Brightness.dark
-                ? Colors.grey[850]
-                : Colors.grey[100],
-            child: Column(
-              children: [
-                _buildStatusRow('알림 접근 권한', _hasPermission),
-                const SizedBox(height: 8),
-                _buildStatusRow('NotificationListener 실행 중', _isServiceRunning),
-                const SizedBox(height: 16),
-                // 테스트 메시지 입력 필드
-                TextField(
-                  controller: _testMessageController,
-                  decoration: InputDecoration(
-                    labelText: '테스트 메시지',
-                    hintText: '예: 홍길동(홍*동)님이 50,000원을 보냈어요.',
-                    labelStyle: TextStyle(
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.grey[300]
-                          : null,
-                    ),
-                    hintStyle: TextStyle(
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.grey[400]
-                          : null,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.clear, size: 20),
-                      onPressed: () => _testMessageController.clear(),
-                    ),
-                  ),
-                  style: const TextStyle(fontSize: 14),
-                  maxLines: 2,
-                ),
-                const SizedBox(height: 12),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      ElevatedButton.icon(
-                        onPressed: _checkStatus,
-                        icon: const Icon(Icons.refresh, size: 18),
-                        label: const Text('상태 갱신', style: TextStyle(fontSize: 12)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryColor,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        onPressed: _sendTestNotification,
-                        icon: const Icon(Icons.send, size: 18),
-                        label: const Text('테스트', style: TextStyle(fontSize: 12)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.successColor,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        onPressed: () async {
-                          final provider = Provider.of<NotificationProvider>(context, listen: false);
-                          await provider.retrySendingFailedNotifications();
-                          await _loadFailedQueue(); // 재전송 후 큐 정보 갱신
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('실패한 알림을 다시 전송하고 있습니다'),
-                              backgroundColor: AppTheme.primaryColor,
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.cloud_upload, size: 18),
-                        label: Text(
-                          '재전송${_failedQueue != null && _failedQueue!['totalCount'] > 0 ? ' (${_failedQueue!['totalCount']})' : ''}', 
-                          style: const TextStyle(fontSize: 12)
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+    return DefaultTabController(
+      length: 4,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('알림 파싱 테스트'),
+          backgroundColor: AppTheme.primaryColor,
+          foregroundColor: Colors.white,
+          actions: [
+            IconButton(
+              icon: Icon(_autoRefresh ? Icons.pause : Icons.play_arrow),
+              onPressed: _toggleAutoRefresh,
+              tooltip: _autoRefresh ? '자동 새로고침 정지' : '자동 새로고침 시작',
             ),
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _loadAllData,
+              tooltip: '수동 새로고침',
+            ),
+            IconButton(
+              icon: const Icon(Icons.article),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const LogViewerScreen(),
+                  ),
+                );
+              },
+              tooltip: '시스템 로그',
+            ),
+          ],
+          bottom: const TabBar(
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            indicatorColor: Colors.white,
+            tabs: [
+              Tab(icon: Icon(Icons.health_and_safety), text: '상태'),
+              Tab(icon: Icon(Icons.list_alt), text: '로그'),
+              Tab(icon: Icon(Icons.bug_report), text: '테스트'),
+              Tab(icon: Icon(Icons.queue), text: '큐'),
+            ],
           ),
-          
-          // 실패 큐 정보 표시
-          if (_failedQueue != null && _failedQueue!['totalCount'] > 0)
-            Container(
+        ),
+        body: TabBarView(
+          children: [
+            _buildStatusTab(),
+            _buildLogsTab(),
+            _buildTestTab(),
+            _buildQueueTab(),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildStatusTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 서비스 상태 카드
+          Card(
+            child: Padding(
               padding: const EdgeInsets.all(16),
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.red[900]?.withOpacity(0.3)
-                  : Colors.red[50],
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.error_outline, color: Colors.red, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        '전송 실패 큐: ${_failedQueue!['totalCount']}건',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.red,
-                        ),
-                      ),
-                      const Spacer(),
-                      TextButton(
-                        onPressed: () {
-                          _showFailedQueueDetails();
-                        },
-                        child: const Text(
-                          '상세보기',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                      ),
-                    ],
+                  Text(
+                    'NotificationService 상태',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
+                  const SizedBox(height: 16),
+                  _buildStatusRow('알림 접근 권한', _hasPermission),
+                  const SizedBox(height: 8),
+                  _buildStatusRow('서비스 실행 중', _isServiceRunning),
+                  if (_serviceHealth != null) ...[
+                    const SizedBox(height: 8),
+                    _buildStatusRow('접근성 서비스', _serviceHealth!['isAccessibilityEnabled'] ?? false),
+                    const SizedBox(height: 8),
+                    _buildStatusRow('서비스 정상', _serviceHealth!['isHealthy'] ?? false),
+                  ],
                 ],
               ),
             ),
+          ),
           
-          // 알림 목록
-          Expanded(
-            child: notifications.isEmpty
-                ? const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.notifications_off_outlined,
-                          size: 80,
-                          color: Colors.grey,
-                        ),
-                        SizedBox(height: 16),
-                        Text(
-                          '수신된 알림이 없습니다',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Colors.grey,
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          '카카오톡 입금 알림이 오면 여기에 표시됩니다',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ],
+          const SizedBox(height: 16),
+          
+          // 상세 정보 카드
+          if (_serviceHealth != null)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '상세 정보',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: notifications.length,
-                    itemBuilder: (context, index) {
-                      final notification = notifications[index];
-                      final parsedData = notification.parsedData;
-                      final isFinancial = parsedData != null && parsedData['type'] != 'unknown';
-
-                      return Card(
-                        color: isFinancial 
-                            ? (Theme.of(context).brightness == Brightness.dark
-                                ? Colors.green[900]?.withOpacity(0.3)
-                                : Colors.green[50])
-                            : null,
-                        margin: const EdgeInsets.only(bottom: 12),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    isFinancial ? Icons.attach_money : Icons.message,
-                                    color: isFinancial ? Colors.green : Colors.grey,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    notification.sender,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  // 서버 전송 상태 표시
-                                  if (isFinancial) ...[
-                                    Tooltip(
-                                      message: notification.isServerSent 
-                                        ? '서버 전송 완료' 
-                                        : notification.errorMessage != null 
-                                          ? '전송 실패: ${notification.errorMessage}'
-                                          : '서버 전송 대기',
-                                      child: Icon(
-                                        notification.isServerSent
-                                          ? Icons.cloud_done
-                                          : notification.errorMessage != null
-                                            ? Icons.cloud_off
-                                            : Icons.cloud_upload,
-                                        color: notification.isServerSent
-                                          ? Colors.green
-                                          : notification.errorMessage != null
-                                            ? Colors.red
-                                            : Colors.orange,
-                                        size: 16,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                  ],
-                                  Text(
-                                    DateTimeUtils.formatKST(notification.receivedAt, 'MM/dd HH:mm:ss'),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                notification.message,
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                              if (isFinancial) ...[
-                                const SizedBox(height: 12),
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context).brightness == Brightness.dark
-                                        ? Colors.green[900]?.withOpacity(0.3)
-                                        : Colors.green[100],
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        '파싱 결과',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: Theme.of(context).brightness == Brightness.dark
-                                              ? Colors.green[400]
-                                              : Colors.green[800],
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      _buildParsedInfo('유형', parsedData['type']),
-                                      _buildParsedInfo('금액', '${parsedData['amount']}원'),
-                                      if (parsedData['from'] != null)
-                                        _buildParsedInfo('보낸 사람', parsedData['from']),
-                                      if (parsedData['balance'] != null)
-                                        _buildParsedInfo('잔액', '${parsedData['balance']}원'),
-                                    ],
-                                  ),
-                                ),
-                                if (notification.errorMessage != null) ...[
-                                  const SizedBox(height: 8),
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: Theme.of(context).brightness == Brightness.dark
-                                          ? Colors.red[900]?.withOpacity(0.3)
-                                          : Colors.red[50],
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          Icons.error_outline,
-                                          color: Theme.of(context).brightness == Brightness.dark
-                                              ? Colors.red[400]
-                                              : Colors.red,
-                                          size: 16,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Expanded(
-                                          child: Text(
-                                            notification.errorMessage!,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Theme.of(context).brightness == Brightness.dark
-                                                  ? Colors.red[400]
-                                                  : Colors.red[800],
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ],
-                          ),
-                        ),
-                      );
-                    },
+                    const SizedBox(height: 16),
+                    _buildInfoRow('큐 크기', '${_serviceHealth!['queueSize']} 개'),
+                    _buildInfoRow('마지막 헬스체크', _formatTimestamp(_serviceHealth!['lastHealthCheck'])),
+                    _buildInfoRow('마지막 알림', _formatTimestamp(_serviceHealth!['lastNotificationTime'])),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildLogsTab() {
+    return Column(
+      children: [
+        // 상단 정보
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          color: Theme.of(context).cardColor,
+          child: Text(
+            '최근 파싱 로그 (${_recentLogs.length}개)',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        
+        // 로그 리스트
+        Expanded(
+          child: _recentLogs.isEmpty
+              ? const Center(child: Text('로그가 없습니다'))
+              : ListView.builder(
+                  itemCount: _recentLogs.length,
+                  itemBuilder: (context, index) {
+                    final log = _recentLogs[index];
+                    return _buildLogItem(log);
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildTestTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // 테스트 메시지 입력
+          TextField(
+            controller: _testMessageController,
+            decoration: InputDecoration(
+              labelText: '테스트 메시지',
+              hintText: '예: 홍길동(홍*동)님이 50,000원을 보냈어요.',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.clear),
+                onPressed: () => _testMessageController.clear(),
+              ),
+            ),
+            maxLines: 3,
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // 테스트 버튼들
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _sendTestNotification,
+                  icon: const Icon(Icons.send),
+                  label: const Text('테스트 알림 전송'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.successColor,
                   ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
-
+  
+  Widget _buildQueueTab() {
+    return Column(
+      children: [
+        // 상단 정보
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          color: Theme.of(context).cardColor,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '실패 큐 (${_failedQueueItems.length}개)',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (_failedQueueItems.isNotEmpty)
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    final provider = Provider.of<NotificationProvider>(context, listen: false);
+                    await provider.retrySendingFailedNotifications();
+                    await _loadFailedQueue();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('재전송 시작')),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('재전송'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryColor,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        
+        // 큐 리스트
+        Expanded(
+          child: _failedQueueItems.isEmpty
+              ? const Center(child: Text('실패한 알림이 없습니다'))
+              : ListView.builder(
+                  itemCount: _failedQueueItems.length,
+                  itemBuilder: (context, index) {
+                    final item = _failedQueueItems[index];
+                    return _buildQueueItem(item);
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildLogItem(Map<String, dynamic> log) {
+    final type = log['type'] ?? 'UNKNOWN';
+    final timestamp = log['timestamp'] ?? 0;
+    final message = log['message'] ?? '';
+    
+    Color typeColor = Colors.grey;
+    if (type.contains('SUCCESS')) typeColor = Colors.green;
+    else if (type.contains('ERROR') || type.contains('FAILED')) typeColor = Colors.red;
+    else if (type.contains('PARSE')) typeColor = Colors.blue;
+    
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: typeColor.withOpacity(0.2),
+          child: Icon(
+            type.contains('SUCCESS') ? Icons.check : 
+            type.contains('ERROR') ? Icons.error : Icons.info,
+            color: typeColor,
+            size: 16,
+          ),
+        ),
+        title: Text(
+          type,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: typeColor,
+          ),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message,
+              style: const TextStyle(fontSize: 11),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            Text(
+              _formatTimestamp(timestamp),
+              style: TextStyle(
+                fontSize: 10,
+                color: Colors.grey[600],
+              ),
+            ),
+          ],
+        ),
+        dense: true,
+      ),
+    );
+  }
+  
+  Widget _buildQueueItem(Map<String, dynamic> item) {
+    final id = item['id'] ?? '';
+    final message = item['message'] ?? '';
+    final retryCount = item['retryCount'] ?? 0;
+    final timestamp = item['timestamp'] ?? 0;
+    
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: Colors.orange.withOpacity(0.2),
+          child: Text(
+            '$retryCount',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Colors.orange,
+            ),
+          ),
+        ),
+        title: Text(
+          'ID: $id',
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message,
+              style: const TextStyle(fontSize: 11),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            Text(
+              '재시도: $retryCount회 • ${_formatTimestamp(timestamp)}',
+              style: TextStyle(
+                fontSize: 10,
+                color: Colors.grey[600],
+              ),
+            ),
+          ],
+        ),
+        dense: true,
+      ),
+    );
+  }
+  
   Widget _buildStatusRow(String label, bool status) {
     return Row(
       children: [
@@ -474,11 +529,7 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
         const SizedBox(width: 8),
         Text(
           label,
-          style: TextStyle(
-            color: Theme.of(context).brightness == Brightness.dark
-                ? Colors.grey[300]
-                : Colors.black87,
-          ),
+          style: const TextStyle(fontSize: 14),
         ),
         const Spacer(),
         Text(
@@ -486,164 +537,23 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
           style: TextStyle(
             color: status ? Colors.green : Colors.red,
             fontWeight: FontWeight.bold,
+            fontSize: 14,
           ),
         ),
       ],
     );
   }
-
-  Widget _buildParsedInfo(String label, String? value) {
-    if (value == null) return const SizedBox.shrink();
+  
+  Widget _buildInfoRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.only(top: 2),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            '$label: ',
-            style: TextStyle(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.green[400]
-                  : Colors.green[700],
-              fontSize: 12,
-            ),
-          ),
+          Text(label, style: const TextStyle(fontSize: 14)),
           Text(
             value,
-            style: TextStyle(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.green[300]
-                  : Colors.green[900],
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  void _showFailedQueueDetails() {
-    if (_failedQueue == null) return;
-    
-    final notifications = _failedQueue!['notifications'] as List<dynamic>;
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            const Icon(Icons.error_outline, color: Colors.red),
-            const SizedBox(width: 8),
-            Text('전송 실패 큐 (${notifications.length}건)'),
-          ],
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 400,
-          child: ListView.builder(
-            itemCount: notifications.length,
-            itemBuilder: (context, index) {
-              final notification = notifications[index];
-              final elapsedMinutes = notification['elapsedMinutes'] ?? 0;
-              final hours = elapsedMinutes ~/ 60;
-              final minutes = elapsedMinutes % 60;
-              
-              return Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                color: notification['isDeposit'] == true
-                    ? Theme.of(context).brightness == Brightness.dark
-                        ? Colors.green[900]?.withOpacity(0.3)
-                        : Colors.green[50]
-                    : null,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            notification['isDeposit'] == true
-                                ? Icons.attach_money
-                                : Icons.message,
-                            size: 16,
-                            color: notification['isDeposit'] == true
-                                ? Colors.green
-                                : Colors.grey,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              '재시도: ${notification['retryCount']}회',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            hours > 0 ? '${hours}시간 ${minutes}분 전' : '${minutes}분 전',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        notification['message'] ?? '',
-                        style: const TextStyle(fontSize: 13),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (notification['lastRetryTime'] != null && notification['lastRetryTime'] > 0) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          '마지막 재시도: ${_formatTimestamp(notification['lastRetryTime'])}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('닫기'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                await platform.invokeMethod('cleanNotificationQueue');
-                await _loadFailedQueue();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('입금 알림이 아닌 항목들을 제거했습니다'),
-                    backgroundColor: AppTheme.successColor,
-                  ),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('큐 정리 실패: $e'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
-            ),
-            child: const Text('비입금 알림 제거'),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -651,7 +561,14 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
   }
   
   String _formatTimestamp(int timestamp) {
+    if (timestamp == 0) return '없음';
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
-    return DateTimeUtils.formatKST(date, 'MM/dd HH:mm');
+    final now = DateTime.now();
+    final diff = now.difference(date);
+    
+    if (diff.inMinutes < 1) return '방금 전';
+    if (diff.inHours < 1) return '${diff.inMinutes}분 전';
+    if (diff.inDays < 1) return '${diff.inHours}시간 전';
+    return DateTimeUtils.getKSTDateString(date);
   }
 }

@@ -96,6 +96,44 @@ class MainActivity : FlutterActivity() {
                         result.error("INVALID_ARGUMENT", "Data is null", null)
                     }
                 }
+                "getServiceHealthInfo" -> {
+                    try {
+                        val prefs = getSharedPreferences("notification_prefs", Context.MODE_PRIVATE)
+                        val healthInfo = JSONObject().apply {
+                            put("isServiceRunning", isNotificationListenerEnabled())
+                            put("hasNotificationPermission", isNotificationListenerEnabled())
+                            put("isAccessibilityEnabled", isAccessibilityServiceEnabled())
+                            put("lastHealthCheck", prefs.getLong("last_health_check", 0))
+                            put("isHealthy", prefs.getBoolean("is_healthy", false))
+                            put("queueSize", prefs.getInt("queue_size", 0))
+                            put("lastNotificationTime", prefs.getLong("last_notification_time", 0))
+                        }
+                        result.success(healthInfo.toString())
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error getting service health info", e)
+                        result.error("ERROR", "Failed to get health info", e.message)
+                    }
+                }
+                "getRecentNotificationLogs" -> {
+                    try {
+                        val logManager = LogManager.getInstance(this@MainActivity)
+                        val recentLogs = logManager.getRecentLogs(50) // 최근 50개 로그
+                        result.success(recentLogs)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error getting recent logs", e)
+                        result.error("ERROR", "Failed to get logs", e.message)
+                    }
+                }
+                "getFailedQueueInfo" -> {
+                    try {
+                        val prefs = getSharedPreferences("notification_prefs", Context.MODE_PRIVATE)
+                        val queueJson = prefs.getString("failed_notifications", "[]")
+                        result.success(queueJson)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error getting queue info", e)
+                        result.error("ERROR", "Failed to get queue info", e.message)
+                    }
+                }
                 "sendTestWebhook" -> {
                     // 테스트용 알림 생성 (서버 전송은 NotificationService가 처리)
                     val message = call.argument<String>("message") ?: "테스트 메시지"
