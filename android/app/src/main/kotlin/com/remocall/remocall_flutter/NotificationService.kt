@@ -922,7 +922,7 @@ class NotificationService : NotificationListenerService() {
             }
             
             Log.d(TAG, "Processing notification from queue (attempt ${notification.retryCount + 1})")
-            logManager.logQueueProcessing("ITEM_START", notificationQueue.size, "ID: ${notification.id}, Retry: ${notification.retryCount}")
+            logManager.logQueueProcessing("ITEM_START", getFailedNotifications().size, "ID: ${notification.id}, Retry: ${notification.retryCount}")
             
             val startTime = System.currentTimeMillis()
             
@@ -1435,8 +1435,6 @@ class NotificationService : NotificationListenerService() {
                 Log.e(TAG, "Notification permission lost! Attempting to rebind...")
                 requestRebind(null)
             }
-            
-            val queueSize = getFailedNotifications().size
             
             // 자가 진단 결과 저장 (MainActivity에서 읽을 수 있도록)
             prefs.edit()

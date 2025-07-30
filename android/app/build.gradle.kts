@@ -5,13 +5,6 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Release 서명 설정을 위한 키 스토어 프로퍼티 로드
-def keystoreProperties = new Properties()
-def keystorePropertiesFile = rootProject.file('key.properties')
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-}
-
 android {
     namespace = "com.remocall.remocall_flutter"
     compileSdk = flutter.compileSdkVersion
@@ -25,18 +18,6 @@ android {
 
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_11.toString()
-    }
-    
-    // Release 서명 설정
-    signingConfigs {
-        if (keystorePropertiesFile.exists()) {
-            create("release") {
-                keyAlias = keystoreProperties['keyAlias']
-                keyPassword = keystoreProperties['keyPassword']
-                storeFile = file(keystoreProperties['storeFile'])
-                storePassword = keystoreProperties['storePassword']
-            }
-        }
     }
     
     packaging {
@@ -67,13 +48,8 @@ android {
 
     buildTypes {
         release {
-            // Release 서명 설정 (key.properties 파일이 있을 때만)
-            if (keystorePropertiesFile.exists()) {
-                signingConfig = signingConfigs.getByName("release")
-            } else {
-                // key.properties가 없으면 debug 키 사용 (개발용)
-                signingConfig = signingConfigs.getByName("debug")
-            }
+            // APK 직접 배포용 - Debug 서명 사용
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }

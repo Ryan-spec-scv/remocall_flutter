@@ -69,7 +69,7 @@ test_*.py
 # GitHub Secrets - IMPORTANT
 github_secrets.properties
 android/app/src/main/kotlin/com/remocall/remocall_flutter/GitHubSecrets.kt
-android/key.properties
+# 키스토어 파일 (필요시 사용)
 android/*.jks
 android/*.keystore
 
