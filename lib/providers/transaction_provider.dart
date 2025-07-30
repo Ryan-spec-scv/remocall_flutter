@@ -3,6 +3,7 @@ import 'package:remocall_flutter/models/transaction_model.dart';
 import 'package:remocall_flutter/services/api_service.dart';
 import 'package:remocall_flutter/services/database_service.dart';
 import 'package:remocall_flutter/utils/datetime_utils.dart';
+import 'package:remocall_flutter/utils/type_utils.dart';
 
 class TransactionProvider extends ChangeNotifier {
   final List<TransactionModel> _transactions = [];
@@ -268,7 +269,7 @@ class TransactionProvider extends ChangeNotifier {
         // 미정산금 정보 업데이트
         final unsettledAmount = data['unsettled']?['amount'];
         if (unsettledAmount != null) {
-          _balance = (unsettledAmount as num).toDouble();
+          _balance = TypeUtils.safeToDouble(unsettledAmount);
           print('Balance updated: $_balance');
         }
         
@@ -344,7 +345,7 @@ class TransactionProvider extends ChangeNotifier {
         
         // 잔액 업데이트
         final unsettledFee = data['unsettled']?['amount'] ?? 0;
-        _balance = unsettledFee is int ? unsettledFee.toDouble() : double.tryParse(unsettledFee.toString()) ?? 0.0;
+        _balance = TypeUtils.safeToDouble(unsettledFee);
         
         print('Realtime data updated');
         notifyListeners();

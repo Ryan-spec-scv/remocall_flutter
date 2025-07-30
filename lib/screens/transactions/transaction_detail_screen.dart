@@ -7,6 +7,7 @@ import 'package:remocall_flutter/providers/auth_provider.dart';
 import 'package:remocall_flutter/services/api_service.dart';
 import 'package:remocall_flutter/utils/theme.dart';
 import 'package:remocall_flutter/utils/datetime_utils.dart';
+import 'package:remocall_flutter/utils/type_utils.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -238,7 +239,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                             const SizedBox(height: 16),
                             _buildDetailRow('거래 ID', _transactionDetail?['id']?.toString() ?? '-'),
                             _buildDetailRow('상태', _getStatusText(widget.transaction.status)),
-                            _buildDetailRow('금액', currencyFormatter.format(_parseDouble(_transactionDetail?['amount']) ?? 0)),
+                            _buildDetailRow('금액', currencyFormatter.format(TypeUtils.safeToDouble(_transactionDetail?['amount']))),
                             _buildDetailRow('입금자명', _transactionDetail?['depositor_name'] ?? '알 수 없음'),
                             if (_transactionDetail?['qr_code'] != null && _transactionDetail!['qr_code'].toString().isNotEmpty)
                               _buildDetailRow('QR 코드', _transactionDetail!['qr_code']),
@@ -381,13 +382,4 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
     );
   }
   
-  double? _parseDouble(dynamic value) {
-    if (value == null) return null;
-    if (value is double) return value;
-    if (value is int) return value.toDouble();
-    if (value is String) {
-      return double.tryParse(value);
-    }
-    return null;
-  }
 }

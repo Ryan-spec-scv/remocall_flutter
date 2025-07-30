@@ -12,7 +12,7 @@ class AppConfig {
   
   // 앱 정보
   static const String appName = '리모콜';
-  static const String appVersion = '1.0.39';
+  static const String appVersion = '1.0.42';
   
   // 타임아웃 설정
   static const Duration connectionTimeout = Duration(seconds: 10);

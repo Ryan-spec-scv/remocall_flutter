@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:remocall_flutter/models/transaction_model.dart';
 import 'package:remocall_flutter/services/api_service_new.dart';
 import 'package:remocall_flutter/services/database_service.dart';
+import 'package:remocall_flutter/utils/type_utils.dart';
 
 class TransactionProvider extends ChangeNotifier {
   final List<TransactionModel> _transactions = [];
@@ -52,7 +53,7 @@ class TransactionProvider extends ChangeNotifier {
       
       // 잔액 업데이트
       if (balanceResponse['success']) {
-        _balance = (balanceResponse['data']['balance'] as num).toDouble();
+        _balance = TypeUtils.safeToDouble(balanceResponse['data']['balance']);
       }
       
       // 거래 내역 처리
@@ -82,7 +83,7 @@ class TransactionProvider extends ChangeNotifier {
           return TransactionModel(
             id: transaction['id'].toString(),
             type: TransactionType.income, // 모든 거래는 입금으로 처리
-            amount: (transaction['amount'] as num).toDouble(),
+            amount: TypeUtils.safeToDouble(transaction['amount']),
             description: transaction['transaction_id'] ?? '',
             sender: transaction['payment_method'] ?? 'kakaopay_qr',
             category: 'payment', // 카테고리는 결제로 고정
@@ -145,7 +146,7 @@ class TransactionProvider extends ChangeNotifier {
       final response = await _apiService.getBalance(token);
       
       if (response['success']) {
-        _balance = (response['data']['balance'] as num).toDouble();
+        _balance = TypeUtils.safeToDouble(response['data']['balance']);
         notifyListeners();
       }
     } catch (e) {

@@ -10,6 +10,7 @@ import 'package:remocall_flutter/services/api_service.dart';
 import 'package:remocall_flutter/services/update_service.dart';
 import 'package:remocall_flutter/utils/theme.dart';
 import 'package:remocall_flutter/utils/datetime_utils.dart';
+import 'package:remocall_flutter/utils/type_utils.dart';
 import 'package:remocall_flutter/config/app_config.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -387,7 +388,7 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> with WidgetsBindi
                           // 월정액 방식인 경우 월정액 표시
                           if (_shopData!['pricing_plan'] == 'monthly_flat_fee' && _shopData!['monthly_flat_fee_amount'] != null)
                             _buildInfoRow('월정액', currencyFormatter.format(
-                              _parseDouble(_shopData!['monthly_flat_fee_amount']) ?? 0
+                              TypeUtils.safeToDouble(_shopData!['monthly_flat_fee_amount'])
                             )),
                           if (_shopData!['settlement_day'] != null)
                             _buildInfoRow('정산일', '매월 ${_shopData!['settlement_day']}일'),
@@ -631,15 +632,6 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> with WidgetsBindi
     );
   }
   
-  double? _parseDouble(dynamic value) {
-    if (value == null) return null;
-    if (value is double) return value;
-    if (value is int) return value.toDouble();
-    if (value is String) {
-      return double.tryParse(value);
-    }
-    return null;
-  }
   
   Widget _buildInstallStep(String number, String text) {
     return Padding(

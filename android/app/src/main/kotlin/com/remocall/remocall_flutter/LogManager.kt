@@ -290,7 +290,7 @@ class LogManager(private val context: Context) {
     private fun scheduleHourlyUpload() {
         scope.launch {
             while (isActive) {
-                delay(60000) // 1분 (추후 1시간으로 변경 예정)
+                delay(600000) // 10분
                 uploadToGitHub()
             }
         }

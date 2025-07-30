@@ -73,7 +73,7 @@ void main() async {
     if (Platform.isAndroid) {
       await Workmanager().initialize(
         callbackDispatcher,
-        isInDebugMode: true,
+        isInDebugMode: !AppConfig.isProduction, // 프로덕션 환경에서는 false
       );
       await Workmanager().cancelAll();
     }

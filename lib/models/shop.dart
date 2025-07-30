@@ -1,4 +1,5 @@
 import 'package:remocall_flutter/utils/datetime_utils.dart';
+import 'package:remocall_flutter/utils/type_utils.dart';
 
 class Shop {
   final int id;
@@ -51,24 +52,14 @@ class Shop {
       createdAt: json['created_at'] != null ? DateTimeUtils.parseToKST(json['created_at']) : null,
       pricingPlan: json['pricing_plan'],
       pricingPlanName: json['pricing_plan_name'],
-      feeRate: _parseDouble(json['fee_rate']),
+      feeRate: TypeUtils.safeToDoubleOrNull(json['fee_rate']),
       settlementDay: json['settlement_day'],
-      monthlyFlatFeeAmount: _parseDouble(json['monthly_flat_fee_amount']),
-      currentCreditBalance: _parseDouble(json['current_credit_balance']) ?? 0.0,
-      overdraftAmount: _parseDouble(json['overdraft_amount']) ?? 0.0,
-      monthlyPrepaidAmount: _parseDouble(json['monthly_prepaid_amount']),
+      monthlyFlatFeeAmount: TypeUtils.safeToDoubleOrNull(json['monthly_flat_fee_amount']),
+      currentCreditBalance: TypeUtils.safeToDouble(json['current_credit_balance']),
+      overdraftAmount: TypeUtils.safeToDouble(json['overdraft_amount']),
+      monthlyPrepaidAmount: TypeUtils.safeToDoubleOrNull(json['monthly_prepaid_amount']),
       domain: json['domain'],
     );
-  }
-  
-  static double? _parseDouble(dynamic value) {
-    if (value == null) return null;
-    if (value is double) return value;
-    if (value is int) return value.toDouble();
-    if (value is String) {
-      return double.tryParse(value);
-    }
-    return null;
   }
 
   Map<String, dynamic> toJson() {

@@ -1,13 +1,13 @@
 name: remocall_flutter
 description: DepositPro - 스마트 입금 관리 시스템
 publish_to: 'none'
-version: 1.0.41+10041
+version: 1.0.42+10042
 
 # 앱 메타데이터
 app_info:
-  version_name: "1.0.41"
-  changelog: "카카오페이 알림 자동 잠금화면 해제 기능 추가"
-  version_date: "2025-07-29"
+  version_name: "1.0.42"
+  changelog: "서비스 안정성 개선 및 메모리 누수 수정"
+  version_date: "2025-07-30"
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

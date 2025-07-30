@@ -1,4 +1,5 @@
 import 'package:remocall_flutter/utils/datetime_utils.dart';
+import 'package:remocall_flutter/utils/type_utils.dart';
 
 enum TransactionType {
   income,
@@ -51,7 +52,7 @@ class TransactionModel {
     return TransactionModel(
       id: json['id'],
       type: _parseTransactionType(json['type']),
-      amount: (json['amount'] as num).toDouble(),
+      amount: TypeUtils.safeToDouble(json['amount']),
       description: json['description'],
       sender: json['sender'],
       receiver: json['receiver'],
@@ -59,7 +60,7 @@ class TransactionModel {
       createdAt: DateTimeUtils.parseToKST(json['created_at']),
       status: _parseTransactionStatus(json['status']),
       account: json['account'],
-      balance: json['balance'] != null ? (json['balance'] as num).toDouble() : null,
+      balance: TypeUtils.safeToDoubleOrNull(json['balance']),
       isSynced: json['is_synced'] == 1 || json['is_synced'] == true,
       rawMessage: json['raw_message'],
     );
