@@ -1488,7 +1488,24 @@ class NotificationService : NotificationListenerService() {
                 
                 // 토큰 갱신 시도
                 val context = applicationContext
-                val success = NotificationService.refreshAccessToken(context)
+                val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                val refreshToken = prefs.getString("flutter.refresh_token", null)
+                
+                if (refreshToken == null) {
+                    Log.e(TAG, "No refresh token available for hourly refresh")
+                    logManager.logTokenRefresh(false, "No refresh token")
+                    isRefreshingToken = false
+                    
+                    // 큐 처리 재개
+                    if (wasProcessingQueue) {
+                        Log.d(TAG, "Resuming queue processing after failed token refresh")
+                        logManager.logQueueProcessing("RESUME_AFTER_TOKEN_REFRESH", getFailedNotifications().size)
+                        startQueueProcessing()
+                    }
+                    return@launch
+                }
+                
+                val success = NotificationService.refreshAccessToken(context, refreshToken)
                 
                 if (success) {
                     Log.d(TAG, "✅ Hourly token refresh successful at ${Date()}")
@@ -1504,9 +1521,11 @@ class NotificationService : NotificationListenerService() {
                     logManager.logTokenRefresh(false, "Hourly refresh failed")
                     
                     // 5분 후 재시도
-                    Timer().schedule(300000) { // 5분
-                        performTokenRefresh()
-                    }
+                    Timer().schedule(object : TimerTask() {
+                        override fun run() {
+                            performTokenRefresh()
+                        }
+                    }, 300000) // 5분
                 }
                 
                 // 큐 처리 재개
