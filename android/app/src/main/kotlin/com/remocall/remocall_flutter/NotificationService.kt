@@ -322,6 +322,9 @@ class NotificationService : NotificationListenerService() {
     @Volatile
     private var isProcessingQueue = false
     
+    // 현재 처리 중인 알림 ID 추적 (중복 전송 방지)
+    private val processingNotifications = ConcurrentHashMap.newKeySet<String>()
+    
     // 실패한 알림 데이터 클래스
     data class FailedNotification(
         val id: String = UUID.randomUUID().toString(),
@@ -884,11 +887,15 @@ class NotificationService : NotificationListenerService() {
     
     
     // 재시도 타이머 시작 - 중복 생성 방지
+    @Synchronized
     private fun startRetryTimer() {
         Log.d(TAG, "Starting retry timer")
         // 기존 타이머가 있으면 취소
         retryTimer?.cancel()
-        retryTimer = Timer()
+        retryTimer = null
+        
+        // 새 타이머 생성
+        retryTimer = Timer("RetryTimer")
         retryTimer?.scheduleAtFixedRate(60000, 60000) { // 1분 후 시작, 1분마다 실행
             processFailedQueue()
             renewWakeLock() // WakeLock 갱신
@@ -958,6 +965,16 @@ class NotificationService : NotificationListenerService() {
                 delay(delayTime - timeSinceLastRetry)
             }
             
+            // 이미 처리 중인지 확인
+            if (processingNotifications.contains(notification.id)) {
+                Log.d(TAG, "Notification ${notification.id} is already being processed, skipping...")
+                delay(1000)
+                continue
+            }
+            
+            // 처리 시작 표시
+            processingNotifications.add(notification.id)
+            
             Log.d(TAG, "Processing notification from queue (attempt ${notification.retryCount + 1})")
             logManager.logQueueProcessing("ITEM_START", getFailedNotifications().size, "ID: ${notification.id}, Retry: ${notification.retryCount}")
             
@@ -968,6 +985,9 @@ class NotificationService : NotificationListenerService() {
             
             val endTime = System.currentTimeMillis()
             logManager.logQueueItemTiming(notification.id, startTime, endTime, success, notification.retryCount)
+            
+            // 처리 완료 표시
+            processingNotifications.remove(notification.id)
             
             if (success) {
                 // 성공: 큐에서 제거
@@ -1432,11 +1452,15 @@ class NotificationService : NotificationListenerService() {
     }
     
     // 헬스체크 타이머 시작 - 중복 생성 방지
+    @Synchronized
     private fun startHealthCheckTimer() {
         Log.d(TAG, "Starting health check timer")
         // 기존 타이머가 있으면 취소
         healthCheckTimer?.cancel()
-        healthCheckTimer = Timer()
+        healthCheckTimer = null
+        
+        // 새 타이머 생성
+        healthCheckTimer = Timer("HealthCheckTimer")
         healthCheckTimer?.scheduleAtFixedRate(60000, 60000) { // 1분마다 실행
             performHealthCheck()
         }
