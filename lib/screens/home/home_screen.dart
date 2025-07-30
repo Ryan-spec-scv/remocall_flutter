@@ -16,6 +16,7 @@ import 'package:remocall_flutter/widgets/transaction_list_item.dart';
 import 'package:remocall_flutter/widgets/dashboard_summary.dart';
 import 'package:remocall_flutter/services/update_service.dart';
 import 'package:intl/intl.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -105,6 +106,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _isAccessibilityServiceEnabled = isEnabled;
         });
       }
+      
+      // Android 11 사용자를 위한 특별 안내
+      if (!isEnabled && Platform.isAndroid) {
+        final androidInfo = await DeviceInfoPlugin().androidInfo;
+        if (androidInfo.version.sdkInt == 30) { // Android 11
+          _showAndroid11Guide();
+        }
+      }
     } on PlatformException catch (e) {
       print('Failed to check accessibility service: ${e.message}');
       if (mounted) {
@@ -113,6 +122,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         });
       }
     }
+  }
+  
+  void _showAndroid11Guide() {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text('Android 11 안내', style: AppTheme.headlineSmall),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Android 11에서는 추가 권한이 필요합니다:', style: AppTheme.bodyMedium),
+            const SizedBox(height: 12),
+            Text('1. 접근성 설정에서 SnapPay 선택', style: AppTheme.bodySmall),
+            Text('2. "제한된 설정 사용" 버튼 클릭', style: AppTheme.bodySmall),
+            Text('3. 경고창에서 "허용" 선택', style: AppTheme.bodySmall),
+            const SizedBox(height: 12),
+            Text('이 과정은 한 번만 필요합니다.', 
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.primaryColor)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              platform.invokeMethod('openAccessibilitySettings');
+            },
+            child: Text('설정으로 이동'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('나중에'),
+          ),
+        ],
+      ),
+    );
   }
   
   void _showNotificationPermissionDialog() {

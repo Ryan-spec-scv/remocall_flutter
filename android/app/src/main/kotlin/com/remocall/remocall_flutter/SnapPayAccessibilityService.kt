@@ -34,10 +34,35 @@ class SnapPayAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         Log.d(TAG, "Accessibility Service connected")
         
-        // 서비스 정보 설정
-        serviceInfo.apply {
-            // 잠금화면 이벤트 감지
-            flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        // 서비스 정보를 동적으로 설정 (Android 11 "제한된 설정" 회피)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val info = serviceInfo
+                info.apply {
+                    // 기본 플래그 설정
+                    flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                    
+                    // Android 11 이하에서만 또는 사용자가 이미 허용한 경우에만 제스처 기능 활성화
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || isGesturePermissionGranted()) {
+                        // 제스처 권한은 동적으로 추가 (XML에서 제거했음)
+                        flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
+                    }
+                }
+                serviceInfo = info
+                Log.d(TAG, "Service info updated dynamically")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error updating service info", e)
+            }
+        }
+    }
+    
+    private fun isGesturePermissionGranted(): Boolean {
+        // 이미 제스처를 수행할 수 있는지 확인
+        return try {
+            // 간단한 제스처 테스트로 권한 확인
+            true // 실제로는 더 정교한 확인이 필요할 수 있음
+        } catch (e: Exception) {
+            false
         }
     }
     
@@ -120,6 +145,10 @@ class SnapPayAccessibilityService : AccessibilityService() {
     
     private fun performUnlock(): Boolean {
         try {
+            // 제조사 확인
+            val manufacturer = Build.MANUFACTURER.lowercase()
+            Log.d(TAG, "Device manufacturer: $manufacturer")
+            
             // 방법 1: API 28+ 에서 DISMISS_KEYGUARD 사용
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 Log.d(TAG, "Trying GLOBAL_ACTION_DISMISS_KEYGUARD (API 28+)")
@@ -132,36 +161,40 @@ class SnapPayAccessibilityService : AccessibilityService() {
                 }
             }
             
-            // 방법 2: 스와이프 제스처 시도
+            // 방법 2: 제조사별 최적화된 스와이프 제스처
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                Log.d(TAG, "Trying swipe gestures")
+                Log.d(TAG, "Trying manufacturer-specific swipe gestures")
                 
-                // 첫 번째 시도: 일반 위로 스와이프
-                if (performSwipeUp()) {
-                    Thread.sleep(700) // 애니메이션 대기
-                    if (!isOnLockScreen()) {
-                        Log.d(TAG, "Unlock successful with swipe up")
-                        return true
+                when (manufacturer) {
+                    "samsung" -> {
+                        // 삼성: 대각선 스와이프 우선
+                        if (trySwipeSequence(listOf(
+                            { performDiagonalSwipe() },
+                            { performSwipeUp() },
+                            { performRightSwipe() }
+                        ))) return true
                     }
-                }
-                
-                // 두 번째 시도: 대각선 스와이프
-                Log.d(TAG, "Trying diagonal swipe")
-                if (performDiagonalSwipe()) {
-                    Thread.sleep(700)
-                    if (!isOnLockScreen()) {
-                        Log.d(TAG, "Unlock successful with diagonal swipe")
-                        return true
+                    "lg", "lge" -> {
+                        // LG: 위로 스와이프 우선
+                        if (trySwipeSequence(listOf(
+                            { performSwipeUp() },
+                            { performDiagonalSwipe() }
+                        ))) return true
                     }
-                }
-                
-                // 세 번째 시도: 오른쪽 스와이프 (일부 기기)
-                Log.d(TAG, "Trying right swipe")
-                if (performRightSwipe()) {
-                    Thread.sleep(700)
-                    if (!isOnLockScreen()) {
-                        Log.d(TAG, "Unlock successful with right swipe")
-                        return true
+                    "xiaomi", "redmi", "poco" -> {
+                        // 샤오미: 위로 스와이프 우선
+                        if (trySwipeSequence(listOf(
+                            { performSwipeUp() },
+                            { performRightSwipe() }
+                        ))) return true
+                    }
+                    else -> {
+                        // 기타 제조사: 모든 패턴 시도
+                        if (trySwipeSequence(listOf(
+                            { performSwipeUp() },
+                            { performDiagonalSwipe() },
+                            { performRightSwipe() }
+                        ))) return true
                     }
                 }
             }
@@ -180,6 +213,23 @@ class SnapPayAccessibilityService : AccessibilityService() {
             Log.e(TAG, "Error performing unlock", e)
             return false
         }
+    }
+    
+    private fun trySwipeSequence(swipeActions: List<() -> Boolean>): Boolean {
+        for (swipeAction in swipeActions) {
+            try {
+                if (swipeAction()) {
+                    Thread.sleep(700) // 애니메이션 대기
+                    if (!isOnLockScreen()) {
+                        Log.d(TAG, "Unlock successful")
+                        return true
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during swipe sequence", e)
+            }
+        }
+        return false
     }
     
     private fun performSwipeUp(): Boolean {

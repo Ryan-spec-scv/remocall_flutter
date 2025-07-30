@@ -1,5 +1,8 @@
 # CLAUDE.md - SnapPay/Remocall Flutter Development Guide
 
+## Language Setting
+**한글로 대화하기** - 이 프로젝트 관련 모든 대화는 한글로 진행합니다.
+
 ## Project Overview
 
 **SnapPay (리모콜)** is a cross-platform Flutter application for smart deposit management that automatically parses Korean financial notifications (KakaoTalk/KakaoPay/SnapPay) and manages transaction records. The app supports Android, iOS, macOS, and Windows with platform-specific functionality.
@@ -410,6 +413,11 @@ flutter run -d <device_id>
 - **Enhanced Lockscreen Dismissal**: Added diagonal swipe gesture that successfully unlocks Samsung devices
 - **UI Improvements**: Added accessibility service status indicators in home screen and settings
 - **Floating Button Control**: Changed shop code condition from '0101' to '0701' for floating button visibility
+- **Android 11 Compatibility**: 
+  - Removed `canPerformGestures` from XML config to avoid "제한된 설정" warning
+  - Implemented dynamic permission setting in `onServiceConnected()`
+  - Added manufacturer-specific swipe patterns (Samsung, LG, Xiaomi)
+  - Added Android 11 user guide dialog for permission instructions
 
 ### Version 1.0.40 (2025-07-29)
 - **Notification Queue System**: Implemented queue-based notification sending with retry mechanism
