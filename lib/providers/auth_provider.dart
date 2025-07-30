@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:remocall_flutter/models/user.dart';
 import 'package:remocall_flutter/models/shop.dart';
@@ -11,6 +12,8 @@ class AuthProvider extends ChangeNotifier {
   String? _error;
   String? _accessToken;
   String? _refreshToken;
+  Timer? _tokenRefreshTimer;
+  bool _isRefreshingToken = false;
 
   Shop? get currentShop => _currentShop;
   bool get isAuthenticated => _currentShop != null && _accessToken != null;
@@ -30,6 +33,9 @@ class AuthProvider extends ChangeNotifier {
       if (_accessToken != null) {
         // Verify token and get user info
         await getShopProfile();
+        
+        // 토큰이 있으면 자동 갱신 타이머 시작
+        _startTokenRefreshTimer();
       }
     } catch (e) {
       print('Error checking auth status: $e');
@@ -74,6 +80,9 @@ class AuthProvider extends ChangeNotifier {
         
         // 로그인 성공 후 전체 프로필 정보 가져오기 (도메인 정보 포함)
         await getShopProfile();
+        
+        // 토큰 자동 갱신 타이머 시작
+        _startTokenRefreshTimer();
         
         return true;
       } else {
@@ -141,6 +150,9 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // 토큰 갱신 타이머 중지
+    _stopTokenRefreshTimer();
+    
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('access_token');
     await prefs.remove('refresh_token');
@@ -161,5 +173,79 @@ class AuthProvider extends ChangeNotifier {
   void _setLoading(bool value) {
     _isLoading = value;
     notifyListeners();
+  }
+
+  // 토큰 자동 갱신 타이머 시작
+  void _startTokenRefreshTimer() {
+    // 기존 타이머가 있으면 중지
+    _stopTokenRefreshTimer();
+    
+    print('[AuthProvider] Starting token refresh timer - will refresh every hour');
+    
+    // 매시간 토큰 갱신 (3600초 = 1시간)
+    _tokenRefreshTimer = Timer.periodic(const Duration(hours: 1), (timer) async {
+      print('[AuthProvider] Token refresh timer triggered at ${DateTime.now()}');
+      await _performTokenRefresh();
+    });
+  }
+
+  // 토큰 갱신 타이머 중지
+  void _stopTokenRefreshTimer() {
+    if (_tokenRefreshTimer != null) {
+      print('[AuthProvider] Stopping token refresh timer');
+      _tokenRefreshTimer!.cancel();
+      _tokenRefreshTimer = null;
+    }
+  }
+
+  // 토큰 갱신 수행
+  Future<void> _performTokenRefresh() async {
+    // 이미 갱신 중이면 스킵
+    if (_isRefreshingToken) {
+      print('[AuthProvider] Token refresh already in progress, skipping...');
+      return;
+    }
+
+    if (_refreshToken == null) {
+      print('[AuthProvider] No refresh token available, skipping refresh');
+      return;
+    }
+
+    _isRefreshingToken = true;
+    print('[AuthProvider] Starting token refresh at ${DateTime.now()}');
+
+    try {
+      final success = await refreshAccessToken();
+      
+      if (success) {
+        print('[AuthProvider] Token refresh successful at ${DateTime.now()}');
+        
+        // Android NotificationService에 토큰 갱신 알림
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('last_token_refresh', DateTime.now().toIso8601String());
+        } catch (e) {
+          print('[AuthProvider] Error updating token refresh timestamp: $e');
+        }
+      } else {
+        print('[AuthProvider] Token refresh failed at ${DateTime.now()}');
+        
+        // 토큰 갱신 실패 시 재시도 (5분 후)
+        Timer(const Duration(minutes: 5), () async {
+          print('[AuthProvider] Retrying token refresh after failure');
+          await _performTokenRefresh();
+        });
+      }
+    } catch (e) {
+      print('[AuthProvider] Exception during token refresh: $e');
+    } finally {
+      _isRefreshingToken = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopTokenRefreshTimer();
+    super.dispose();
   }
 }

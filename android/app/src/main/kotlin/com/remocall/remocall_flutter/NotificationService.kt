@@ -313,6 +313,9 @@ class NotificationService : NotificationListenerService() {
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var logManager: LogManager
     private var healthCheckTimer: Timer? = null
+    private var tokenRefreshTimer: Timer? = null
+    @Volatile
+    private var isRefreshingToken = false
     private val MAX_RECENT_NOTIFICATIONS = 50 // 메모리 사용량 제한
     
     @Volatile
@@ -415,6 +418,9 @@ class NotificationService : NotificationListenerService() {
         
         // 헬스체크 타이머 시작
         startHealthCheckTimer()
+        
+        // 토큰 갱신 타이머 시작
+        startTokenRefreshTimer()
         
         // 서비스 중요도 설정
         try {
@@ -1441,6 +1447,84 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
+    // 토큰 갱신 타이머 시작 - 매시간 갱신
+    @Synchronized
+    private fun startTokenRefreshTimer() {
+        Log.d(TAG, "Starting token refresh timer")
+        // 기존 타이머가 있으면 취소
+        tokenRefreshTimer?.cancel()
+        tokenRefreshTimer = null
+        
+        // 새 타이머 생성
+        tokenRefreshTimer = Timer("TokenRefreshTimer")
+        tokenRefreshTimer?.scheduleAtFixedRate(3600000, 3600000) { // 1시간마다 실행
+            performTokenRefresh()
+        }
+    }
+    
+    // 토큰 갱신 수행
+    private fun performTokenRefresh() {
+        scope.launch {
+            try {
+                // 이미 갱신 중이면 스킵
+                if (isRefreshingToken) {
+                    Log.d(TAG, "Token refresh already in progress, skipping...")
+                    return@launch
+                }
+                
+                isRefreshingToken = true
+                Log.d(TAG, "Starting hourly token refresh at ${Date()}")
+                
+                // 큐 처리 일시 중지
+                val wasProcessingQueue = isProcessingQueue
+                if (wasProcessingQueue) {
+                    Log.d(TAG, "Pausing queue processing for token refresh")
+                    isProcessingQueue = false
+                    delay(500) // 진행 중인 작업이 완료될 시간 부여
+                }
+                
+                // 로그에 큐 처리 중지 기록
+                logManager.logQueueProcessing("PAUSE_FOR_TOKEN_REFRESH", getFailedNotifications().size)
+                
+                // 토큰 갱신 시도
+                val context = applicationContext
+                val success = NotificationService.refreshAccessToken(context)
+                
+                if (success) {
+                    Log.d(TAG, "✅ Hourly token refresh successful at ${Date()}")
+                    logManager.logTokenRefresh(true, "Hourly refresh")
+                    
+                    // 갱신 성공 시간 저장
+                    val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                    prefs.edit()
+                        .putLong("last_token_refresh", System.currentTimeMillis())
+                        .apply()
+                } else {
+                    Log.e(TAG, "❌ Hourly token refresh failed at ${Date()}")
+                    logManager.logTokenRefresh(false, "Hourly refresh failed")
+                    
+                    // 5분 후 재시도
+                    Timer().schedule(300000) { // 5분
+                        performTokenRefresh()
+                    }
+                }
+                
+                // 큐 처리 재개
+                if (wasProcessingQueue) {
+                    Log.d(TAG, "Resuming queue processing after token refresh")
+                    logManager.logQueueProcessing("RESUME_AFTER_TOKEN_REFRESH", getFailedNotifications().size)
+                    startQueueProcessing()
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in performTokenRefresh", e)
+                logManager.logError("performTokenRefresh", e)
+            } finally {
+                isRefreshingToken = false
+            }
+        }
+    }
+    
     // 헬스체크 수행
     private fun performHealthCheck() {
         try {
@@ -1519,6 +1603,7 @@ class NotificationService : NotificationListenerService() {
         
         retryTimer?.cancel()
         healthCheckTimer?.cancel()
+        tokenRefreshTimer?.cancel()
         scope.cancel()
         // Wake lock 해제
         wakeLock?.let {
