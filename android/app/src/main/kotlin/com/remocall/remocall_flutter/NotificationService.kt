@@ -39,6 +39,7 @@ class NotificationService : NotificationListenerService() {
         private const val KAKAO_TALK_PACKAGE = "com.kakao.talk"
         private const val KAKAO_PAY_PACKAGE = "com.kakaopay.app"
         private const val SNAPPAY_PACKAGE = "com.remocall.remocall_flutter"
+        private const val KAKAO_TEST_PACKAGE = "com.test.kakaonotifier.kakao_test_notifier" // 테스트 앱 패키지
         private const val NOTIFICATION_CHANNEL_ID = "depositpro_notification_listener"
         private const val NOTIFICATION_ID = 1001
         private const val WAKE_LOCK_TAG = "SnapPay::NotificationListener"
@@ -546,13 +547,30 @@ class NotificationService : NotificationListenerService() {
             return
         }
         
-        // 스냅페이와 카카오페이 알림 모두 처리
-        if (sbn.packageName != SNAPPAY_PACKAGE && sbn.packageName != KAKAO_PAY_PACKAGE) {
-            Log.d(TAG, "Not SnapPay or KakaoPay, skipping...")
+        // SharedPreferences에서 개발 모드 확인
+        val flutterPrefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val isProduction = flutterPrefs.getBoolean("flutter.is_production", true)
+        
+        // 개발 모드에서만 테스트 앱 허용
+        val isTestPackageAllowed = !isProduction && sbn.packageName == KAKAO_TEST_PACKAGE
+        
+        // 스냅페이, 카카오페이, 그리고 개발모드의 테스트 앱 알림만 처리
+        if (sbn.packageName != SNAPPAY_PACKAGE && 
+            sbn.packageName != KAKAO_PAY_PACKAGE && 
+            !isTestPackageAllowed) {
+            Log.d(TAG, "Not allowed package: ${sbn.packageName}, skipping...")
             return
         }
         
-        Log.d(TAG, "Processing notification from: ${sbn.packageName} (${if (sbn.packageName == SNAPPAY_PACKAGE) "SnapPay" else "KakaoPay"})")
+        // 패키지명에 따른 구분 표시
+        val packageType = when (sbn.packageName) {
+            SNAPPAY_PACKAGE -> "SnapPay"
+            KAKAO_PAY_PACKAGE -> "KakaoPay"
+            KAKAO_TEST_PACKAGE -> "KakaoTest(DEV)"
+            else -> "Unknown"
+        }
+        
+        Log.d(TAG, "Processing notification from: ${sbn.packageName} ($packageType)")
         
         try {
             val notification = sbn.notification
@@ -568,12 +586,22 @@ class NotificationService : NotificationListenerService() {
                 return
             }
             
-            // 카카오페이 및 스냅페이 알림 수신 로그
-            if (sbn.packageName == KAKAO_PAY_PACKAGE || sbn.packageName == SNAPPAY_PACKAGE) {
+            // 카카오페이, 스냅페이, 그리고 개발모드의 테스트 앱 알림 로그
+            if (sbn.packageName == KAKAO_PAY_PACKAGE || 
+                sbn.packageName == SNAPPAY_PACKAGE ||
+                (!isProduction && sbn.packageName == KAKAO_TEST_PACKAGE)) {
+                
+                // 테스트 앱인 경우 패키지명에 (TEST) 추가
+                val logPackageName = if (sbn.packageName == KAKAO_TEST_PACKAGE) {
+                    "${sbn.packageName} (TEST)"
+                } else {
+                    sbn.packageName
+                }
+                
                 logManager.logNotificationReceived(
                     title = title,
                     message = bigText,
-                    packageName = sbn.packageName,
+                    packageName = logPackageName,
                     notificationId = sbn.id,
                     postTime = sbn.postTime
                 )
@@ -689,6 +717,15 @@ class NotificationService : NotificationListenerService() {
                     Log.d(TAG, "Parsed sender: ${result["from"]} (${result["from_masked"]})")
                 }
             }
+            // 테스트 앱 형식: "김철수(김*수)님이 10,000원을 보냈습니다."
+            message.contains("님이") && message.contains("원을 보냈습니다") -> {
+                val senderPattern = Regex("([가-힣a-zA-Z0-9]+)\\(([가-힣a-zA-Z0-9*]+)\\)님이")
+                senderPattern.find(message)?.let {
+                    result["from"] = it.groupValues[1].trim()
+                    result["from_masked"] = it.groupValues[2].trim()
+                    Log.d(TAG, "Parsed sender (Test App): ${result["from"]} (${result["from_masked"]})")
+                }
+            }
             // 카카오뱅크/토스 등의 입금 형식: "홍길동님이 50,000원 입금"
             message.contains("님이") && message.contains("입금") -> {
                 val senderPattern = Regex("([가-힣a-zA-Z0-9]+)님이")
@@ -770,9 +807,9 @@ class NotificationService : NotificationListenerService() {
     
     // 입금 알림인지 확인하는 함수
     private fun isDepositNotification(message: String): Boolean {
-        // 입금 패턴: "이름(마스킹)님이 금액원을 보냈어요"
+        // 입금 패턴: "이름(마스킹)님이 금액원을 보냈어요" 또는 "이름(마스킹)님이 금액원을 보냈습니다."
         // 더 유연한 패턴: 마침표 유무, 공백 차이 등을 허용
-        val depositPattern = Regex(".*\\(.*\\*.*\\)님이\\s*[0-9,]+원을\\s*보냈어요.*")
+        val depositPattern = Regex(".*\\(.*\\*.*\\)님이\\s*[0-9,]+원을\\s*(보냈어요|보냈습니다).*")
         
         // 제외할 패턴들 (송금, 이체 등)
         val excludePatterns = listOf(
