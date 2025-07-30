@@ -98,15 +98,15 @@ class MainActivity : FlutterActivity() {
                 }
                 "getServiceHealthInfo" -> {
                     try {
-                        val prefs = getSharedPreferences("notification_prefs", Context.MODE_PRIVATE)
+                        val healthPrefs = getSharedPreferences("NotificationHealth", Context.MODE_PRIVATE)
                         val healthInfo = JSONObject().apply {
                             put("isServiceRunning", isNotificationListenerEnabled())
                             put("hasNotificationPermission", isNotificationListenerEnabled())
                             put("isAccessibilityEnabled", isAccessibilityServiceEnabled())
-                            put("lastHealthCheck", prefs.getLong("last_health_check", 0))
-                            put("isHealthy", prefs.getBoolean("is_healthy", false))
-                            put("queueSize", prefs.getInt("queue_size", 0))
-                            put("lastNotificationTime", prefs.getLong("last_notification_time", 0))
+                            put("lastHealthCheck", healthPrefs.getLong("last_health_check", 0))
+                            put("isHealthy", healthPrefs.getBoolean("is_healthy", false))
+                            put("queueSize", healthPrefs.getInt("queue_size", 0))
+                            put("lastNotificationTime", healthPrefs.getLong("last_any_notification", 0))
                         }
                         result.success(healthInfo.toString())
                     } catch (e: Exception) {
@@ -126,8 +126,8 @@ class MainActivity : FlutterActivity() {
                 }
                 "getFailedQueueInfo" -> {
                     try {
-                        val prefs = getSharedPreferences("notification_prefs", Context.MODE_PRIVATE)
-                        val queueJson = prefs.getString("failed_notifications", "[]")
+                        val queuePrefs = getSharedPreferences("NotificationQueue", Context.MODE_PRIVATE)
+                        val queueJson = queuePrefs.getString("failed_notifications", "[]")
                         result.success(queueJson)
                     } catch (e: Exception) {
                         Log.e(TAG, "Error getting queue info", e)
