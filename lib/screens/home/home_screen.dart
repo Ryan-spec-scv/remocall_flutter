@@ -191,7 +191,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     
     return Scaffold(
       body: _buildHomeTab(),
-      floatingActionButton: shop?.code == '0101' 
+      floatingActionButton: shop?.code == '0701' 
         ? FloatingActionButton(
             onPressed: () {
               Navigator.push(

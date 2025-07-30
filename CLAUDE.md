@@ -13,7 +13,7 @@
 
 ### App Metadata
 - **App Name**: SnapPay (리모콜)
-- **Current Version**: 1.0.40+10040
+- **Current Version**: 1.0.41+10041
 - **Package**: com.remocall.remocall_flutter
 - **Flutter SDK**: >=3.0.0 <4.0.0
 
@@ -405,6 +405,11 @@ flutter run -d <device_id>
 
 ## Recent Updates
 
+### Version 1.0.41 (2025-07-29)
+- **Accessibility Service**: Implemented SnapPayAccessibilityService for automatic lockscreen dismissal on KakaoPay notifications
+- **Enhanced Lockscreen Dismissal**: Added diagonal swipe gesture that successfully unlocks Samsung devices
+- **UI Improvements**: Added accessibility service status indicators in home screen and settings
+
 ### Version 1.0.40 (2025-07-29)
 - **Notification Queue System**: Implemented queue-based notification sending with retry mechanism
 - **Service Stability**: Enhanced Android service reliability with permanent WakeLock and faster monitoring
@@ -413,7 +418,5 @@ flutter run -d <device_id>
 - **UI Improvements**: Fixed mobile pagination layout to display 4 page buttons at a time for better mobile UX
 - **Wake Screen on KakaoPay**: Simplified screen wake-up condition - now wakes screen for all KakaoPay notifications
 - **Lockscreen Dismiss**: Enhanced lockscreen dismissal with KeyguardDismissCallback and additional Intent flags
-- **Accessibility Service**: Implemented SnapPayAccessibilityService for automatic lockscreen dismissal on KakaoPay notifications
-- **Enhanced Lockscreen Dismissal**: Added diagonal swipe gesture that successfully unlocks Samsung devices
 
 This guide provides comprehensive information for Claude instances working with the SnapPay Flutter codebase. The application is a production Korean fintech app with complex notification parsing requirements and multi-platform deployment needs.
