@@ -260,8 +260,13 @@ class LogManager(private val context: Context) {
     private fun writeLog(logData: JSONObject) {
         scope.launch {
             try {
-                val currentHour = fileNameFormat.format(Date())
-                val logFileName = "log_$currentHour.json"
+                val now = Date()
+                val hourFormat = SimpleDateFormat("yyyy-MM-dd_HH", Locale.getDefault())
+                val minuteFormat = SimpleDateFormat("mm", Locale.getDefault())
+                val currentHour = hourFormat.format(now)
+                val minute = minuteFormat.format(now).toInt()
+                val segment = minute / 10  // 0-5 for each 10-minute segment
+                val logFileName = "log_${currentHour}_${segment}.json"
                 
                 if (currentLogFile?.name != logFileName) {
                     currentLogFile = File(logDir, logFileName)
@@ -271,7 +276,7 @@ class LogManager(private val context: Context) {
                 if (currentLogFile!!.exists() && currentLogFile!!.length() > 10 * 1024 * 1024) {
                     Log.w(TAG, "Log file size exceeds 10MB, creating new file")
                     val timestamp = System.currentTimeMillis()
-                    currentLogFile = File(logDir, "log_${currentHour}_$timestamp.json")
+                    currentLogFile = File(logDir, "log_${currentHour}_${segment}_$timestamp.json")
                 }
                 
                 // 로그 추가 (한 줄에 하나의 JSON)
