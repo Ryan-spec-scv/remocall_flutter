@@ -333,7 +333,8 @@ class NotificationService : NotificationListenerService() {
         val timestamp: Long,
         val retryCount: Int = 0,
         val lastRetryTime: Long = 0,
-        val createdAt: Long = System.currentTimeMillis()
+        val createdAt: Long = System.currentTimeMillis(),
+        val nextRetryTime: Long = System.currentTimeMillis()  // 다음 재시도 가능 시간
     ) {
         fun toJson(): JSONObject {
             return JSONObject().apply {
@@ -344,6 +345,7 @@ class NotificationService : NotificationListenerService() {
                 put("retryCount", retryCount)
                 put("lastRetryTime", lastRetryTime)
                 put("createdAt", createdAt)
+                put("nextRetryTime", nextRetryTime)
             }
         }
         
@@ -356,7 +358,8 @@ class NotificationService : NotificationListenerService() {
                     timestamp = json.getLong("timestamp"),
                     retryCount = json.getInt("retryCount"),
                     lastRetryTime = json.getLong("lastRetryTime"),
-                    createdAt = json.getLong("createdAt")
+                    createdAt = json.getLong("createdAt"),
+                    nextRetryTime = json.optLong("nextRetryTime", System.currentTimeMillis())
                 )
             }
         }
@@ -897,7 +900,11 @@ class NotificationService : NotificationListenerService() {
         // 새 타이머 생성
         retryTimer = Timer("RetryTimer")
         retryTimer?.scheduleAtFixedRate(60000, 60000) { // 1분 후 시작, 1분마다 실행
-            processFailedQueue()
+            // 큐가 있으면 처리 시작
+            val notifications = getFailedNotifications()
+            if (notifications.isNotEmpty() && !isProcessingQueue) {
+                startQueueProcessing()
+            }
             renewWakeLock() // WakeLock 갱신
         }
     }
@@ -951,71 +958,82 @@ class NotificationService : NotificationListenerService() {
                 break
             }
             
+            val currentTime = System.currentTimeMillis()
+            var processedAny = false
+            
             logManager.logQueueProcessing("START", notifications.size)
             
-            // 첫 번째 알림 처리
-            val notification = notifications.firstOrNull() ?: break
-            
-            // 재시도 대기 시간 확인
-            val delayTime = getRetryDelay(notification.retryCount)
-            val timeSinceLastRetry = System.currentTimeMillis() - notification.lastRetryTime
-            
-            if (timeSinceLastRetry < delayTime) {
-                // 아직 대기 시간이 안 됨
-                delay(delayTime - timeSinceLastRetry)
-            }
-            
-            // 이미 처리 중인지 확인
-            if (processingNotifications.contains(notification.id)) {
-                Log.d(TAG, "Notification ${notification.id} is already being processed, skipping...")
-                delay(1000)
-                continue
-            }
-            
-            // 처리 시작 표시
-            processingNotifications.add(notification.id)
-            
-            Log.d(TAG, "Processing notification from queue (attempt ${notification.retryCount + 1})")
-            logManager.logQueueProcessing("ITEM_START", getFailedNotifications().size, "ID: ${notification.id}, Retry: ${notification.retryCount}")
-            
-            val startTime = System.currentTimeMillis()
-            
-            // 전송 시도
-            val success = sendNotificationToServer(notification)
-            
-            val endTime = System.currentTimeMillis()
-            logManager.logQueueItemTiming(notification.id, startTime, endTime, success, notification.retryCount)
-            
-            // 처리 완료 표시
-            processingNotifications.remove(notification.id)
-            
-            if (success) {
-                // 성공: 큐에서 제거
-                removeFromQueue(notification.id)
-                Log.d(TAG, "Notification sent successfully and removed from queue")
-                val remainingSize = getFailedNotifications().size
-                logManager.logQueueProcessing("ITEM_COMPLETE", remainingSize, "ID: ${notification.id}")
-            } else {
-                // 실패: 재시도 제한 확인
-                if (notification.retryCount < MAX_QUEUE_ITEM_RETRY) {
-                    val updatedNotification = notification.copy(
-                        retryCount = notification.retryCount + 1,
-                        lastRetryTime = System.currentTimeMillis()
-                    )
-                    updateNotificationInQueue(updatedNotification)
-                    
-                    Log.d(TAG, "Notification failed, updated retry count. Retry ${updatedNotification.retryCount}/$MAX_QUEUE_ITEM_RETRY")
-                    val queueSize = getFailedNotifications().size
-                    logManager.logQueueProcessing("ITEM_FAILED", queueSize, "ID: ${notification.id}, New retry count: ${updatedNotification.retryCount}")
-                } else {
-                    // 최대 재시도 회수 초과 - SharedPreferences에는 유지
-                    Log.w(TAG, "Notification ${notification.id} exceeded max retry count. Keeping in storage but not retrying.")
-                    val queueSize = getFailedNotifications().size
-                    logManager.logQueueProcessing("ITEM_MAX_RETRY", queueSize, "ID: ${notification.id}")
+            // 모든 알림을 순회하며 처리 가능한 것들 처리
+            for (notification in notifications) {
+                // 다음 재시도 시간 확인
+                if (currentTime < notification.nextRetryTime) {
+                    Log.d(TAG, "Notification ${notification.id} not ready for retry. Next retry in ${(notification.nextRetryTime - currentTime) / 1000}s")
+                    continue
                 }
                 
-                // 짧은 대기
-                delay(1000)
+                // 이미 처리 중인지 확인
+                if (processingNotifications.contains(notification.id)) {
+                    Log.d(TAG, "Notification ${notification.id} is already being processed, skipping...")
+                    continue
+                }
+                
+                // 처리 시작 표시
+                processingNotifications.add(notification.id)
+                processedAny = true
+                
+                Log.d(TAG, "Processing notification from queue (attempt ${notification.retryCount + 1})")
+                logManager.logQueueProcessing("ITEM_START", getFailedNotifications().size, "ID: ${notification.id}, Retry: ${notification.retryCount}")
+                
+                val startTime = System.currentTimeMillis()
+                
+                // 전송 시도
+                val (success, isDuplicate) = sendNotificationToServer(notification)
+                
+                val endTime = System.currentTimeMillis()
+                logManager.logQueueItemTiming(notification.id, startTime, endTime, success, notification.retryCount)
+                
+                // 처리 완료 표시
+                processingNotifications.remove(notification.id)
+                
+                if (success || isDuplicate) {
+                    // 성공 또는 중복: 큐에서 제거
+                    removeFromQueue(notification.id)
+                    Log.d(TAG, "Notification ${if (isDuplicate) "already processed (duplicate)" else "sent successfully"} and removed from queue")
+                    val remainingSize = getFailedNotifications().size
+                    logManager.logQueueProcessing("ITEM_COMPLETE", remainingSize, "ID: ${notification.id}")
+                } else {
+                    // 실패: 재시도 제한 확인
+                    if (notification.retryCount < MAX_QUEUE_ITEM_RETRY) {
+                        // 큐에서 제거하고 맨 뒤에 다시 추가
+                        removeFromQueue(notification.id)
+                        
+                        val nextRetryTime = System.currentTimeMillis() + getRetryDelay(notification.retryCount + 1)
+                        val updatedNotification = notification.copy(
+                            retryCount = notification.retryCount + 1,
+                            lastRetryTime = System.currentTimeMillis(),
+                            nextRetryTime = nextRetryTime
+                        )
+                        saveFailedNotification(updatedNotification)
+                        
+                        Log.d(TAG, "Notification failed, moved to end of queue. Retry ${updatedNotification.retryCount}/$MAX_QUEUE_ITEM_RETRY, next retry at ${nextRetryTime}")
+                        val queueSize = getFailedNotifications().size
+                        logManager.logQueueProcessing("ITEM_FAILED", queueSize, "ID: ${notification.id}, New retry count: ${updatedNotification.retryCount}")
+                    } else {
+                        // 최대 재시도 회수 초과 - 큐에서 제거
+                        removeFromQueue(notification.id)
+                        Log.w(TAG, "Notification ${notification.id} exceeded max retry count. Removed from queue.")
+                        val queueSize = getFailedNotifications().size
+                        logManager.logQueueProcessing("ITEM_MAX_RETRY", queueSize, "ID: ${notification.id}")
+                    }
+                }
+                
+                // 각 아이템 처리 후 짧은 대기
+                delay(100)
+            }
+            
+            // 아무것도 처리하지 못했으면 잠시 대기
+            if (!processedAny) {
+                delay(5000) // 5초 대기
             }
         }
         
@@ -1036,7 +1054,7 @@ class NotificationService : NotificationListenerService() {
     }
     
     // 실제 서버 전송 로직
-    private suspend fun sendNotificationToServer(notification: FailedNotification): Boolean {
+    private suspend fun sendNotificationToServer(notification: FailedNotification): Pair<Boolean, Boolean> {
         return try {
             // sendToServer 메서드 호출
             val result = withContext(Dispatchers.IO) {
@@ -1045,17 +1063,17 @@ class NotificationService : NotificationListenerService() {
             result
         } catch (e: Exception) {
             Log.e(TAG, "Error sending notification to server", e)
-            false
+            Pair(false, false)
         }
     }
     
     // 직접 서버로 전송 (동기식)
-    private fun sendNotificationDirect(message: String): Boolean {
+    private fun sendNotificationDirect(message: String): Pair<Boolean, Boolean> {
         try {
             // 입금 알림인지 확인
             if (!isDepositNotification(message)) {
                 Log.d(TAG, "Not a deposit notification, removing from queue")
-                return true // 입금 알림이 아니면 성공으로 처리하여 큐에서 제거
+                return Pair(true, false) // 입금 알림이 아니면 성공으로 처리하여 큐에서 제거
             }
             
             // SharedPreferences에서 액세스 토큰 가져오기
@@ -1064,7 +1082,7 @@ class NotificationService : NotificationListenerService() {
             
             if (accessToken == null) {
                 Log.e(TAG, "No access token available")
-                return false
+                return Pair(false, false)
             }
             
             // 서버로 전송
@@ -1097,16 +1115,35 @@ class NotificationService : NotificationListenerService() {
             }
             
             val responseCode = connection.responseCode
+            val responseMessage = try {
+                if (responseCode in 200..299) {
+                    connection.inputStream.bufferedReader().use { it.readText() }
+                } else {
+                    connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                }
+            } catch (e: Exception) {
+                ""
+            }
+            
+            // 응답 로그
+            Log.d(TAG, "Server response code: $responseCode, message: $responseMessage")
+            
+            // 중복 입금 체크
+            val isDuplicate = responseMessage.contains("이미 처리된 입금입니다")
+            if (isDuplicate) {
+                Log.d(TAG, "Server says notification is duplicate, will remove from queue")
+            }
+            
             val success = responseCode in 200..299
             
-            if (!success) {
+            if (!success && !isDuplicate) {
                 Log.e(TAG, "Server returned error code: $responseCode")
             }
             
-            return success
+            return Pair(success, isDuplicate)
         } catch (e: Exception) {
             Log.e(TAG, "Error in sendNotificationDirect", e)
-            return false
+            return Pair(false, false)
         }
     }
     
@@ -1247,102 +1284,40 @@ class NotificationService : NotificationListenerService() {
         return true
     }
     
-    // 실패한 큐 처리
-    private fun processFailedQueue() {
-        scope.launch(Dispatchers.IO) {
-            try {
-                Log.d(TAG, "Processing failed notification queue")
-                val failedNotifications = getFailedNotifications()
-                
-                if (failedNotifications.isEmpty()) {
-                    return@launch
-                }
-                
-                Log.d(TAG, "Found ${failedNotifications.size} failed notifications")
-                
-                failedNotifications.forEach { notification ->
-                    if (shouldRetry(notification)) {
-                        retryNotification(notification)
-                        // 각 알림 사이에 1초 지연
-                        delay(1000)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error processing failed queue", e)
-            }
-        }
-    }
-    
-    // 알림 재전송
-    private fun retryNotification(notification: FailedNotification) {
-        Log.d(TAG, "Retrying notification ${notification.id} (attempt ${notification.retryCount + 1})")
-        
-        // 재시도 로그
-        logManager.logFailedQueue(
-            action = "RETRY",
-            notificationId = notification.id,
-            message = notification.message,
-            retryCount = notification.retryCount + 1,
-            queueSize = getFailedNotifications().size
-        )
-        
-        try {
-            // SharedPreferences에서 액세스 토큰 가져오기
-            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            val accessToken = prefs.getString("flutter.access_token", null)
-            
-            if (accessToken == null) {
-                Log.w(TAG, "No access token for retry, skipping notification ${notification.id}")
-                removeFromQueue(notification.id)
-                return
-            }
-            
-            // 공통 함수 사용 (이미 저장된 timestamp 사용)
-            NotificationService.sendNotificationToServer(
-                context = this@NotificationService,
-                message = notification.message,
-                accessToken = accessToken,
-                onResult = { success, responseMessage ->
-                    if (!success || responseMessage.contains("failed") || responseMessage.contains("실패")) {
-                        Log.e(TAG, "❌ Retry failed: $responseMessage")
-                        // 재시도 카운트 증가하여 다시 저장
-                        val updatedNotification = notification.copy(
-                            retryCount = notification.retryCount + 1,
-                            lastRetryTime = System.currentTimeMillis()
-                        )
-                        updateNotificationInQueue(updatedNotification)
-                    } else {
-                        // 성공 또는 중복인 경우 큐에서 제거
-                        Log.d(TAG, "✅ Retry successful for notification ${notification.id}: $responseMessage")
-                        removeFromQueue(notification.id)
-                        
-                        // 재시도 성공 로그
-                        logManager.logFailedQueue(
-                            action = "REMOVE",
-                            notificationId = notification.id,
-                            message = notification.message,
-                            retryCount = notification.retryCount,
-                            queueSize = getFailedNotifications().size - 1
-                        )
-                    }
-                }
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Retry error: ${e.message}", e)
-            // 재시도 카운트 증가하여 다시 저장
-            val updatedNotification = notification.copy(
-                retryCount = notification.retryCount + 1,
-                lastRetryTime = System.currentTimeMillis()
-            )
-            updateNotificationInQueue(updatedNotification)
-        }
-    }
-    
     // 큐에서 알림 업데이트 - 동기화 처리
     @Synchronized
     private fun updateNotificationInQueue(notification: FailedNotification) {
-        removeFromQueue(notification.id)
-        saveFailedNotification(notification)
+        try {
+            val prefs = getSharedPreferences("NotificationQueue", Context.MODE_PRIVATE)
+            val existingQueue = prefs.getString("failed_notifications", "[]") ?: "[]"
+            val queueArray = JSONArray(existingQueue)
+            
+            val newArray = JSONArray()
+            var updated = false
+            
+            for (i in 0 until queueArray.length()) {
+                val item = queueArray.getJSONObject(i)
+                if (item.getString("id") == notification.id) {
+                    newArray.put(notification.toJson())
+                    updated = true
+                } else {
+                    newArray.put(item)
+                }
+            }
+            
+            // 만약 업데이트할 항목이 없으면 추가
+            if (!updated) {
+                newArray.put(notification.toJson())
+            }
+            
+            prefs.edit()
+                .putString("failed_notifications", newArray.toString())
+                .apply()
+                
+            Log.d(TAG, "Updated notification ${notification.id} in queue")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating notification in queue", e)
+        }
     }
     
     // 입금 알림이 아닌 항목들을 큐에서 제거 - 동기화 처리
