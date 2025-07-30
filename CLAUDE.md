@@ -409,6 +409,7 @@ flutter run -d <device_id>
 - **Accessibility Service**: Implemented SnapPayAccessibilityService for automatic lockscreen dismissal on KakaoPay notifications
 - **Enhanced Lockscreen Dismissal**: Added diagonal swipe gesture that successfully unlocks Samsung devices
 - **UI Improvements**: Added accessibility service status indicators in home screen and settings
+- **Floating Button Control**: Changed shop code condition from '0101' to '0701' for floating button visibility
 
 ### Version 1.0.40 (2025-07-29)
 - **Notification Queue System**: Implemented queue-based notification sending with retry mechanism
