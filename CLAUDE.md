@@ -408,6 +408,18 @@ flutter run -d <device_id>
 
 ## Recent Updates
 
+### Version 1.0.42 (2025-07-30)
+- **NotificationService 안정성 대폭 개선**:
+  - **메모리 누수 해결**: WakeLock 10분 타임아웃, Timer 중복 생성 방지, 알림 캐시 50개 제한
+  - **무한루프 방지**: 토큰 갱신 최대 20회, 큐 아이템 최대 20회 재시도 제한
+  - **좀비 프로세스 방지**: onDestroy 자동 재시작 제거, 서비스 중복 실행 체크 추가
+  - **큐 시스템 개선**: SharedPreferences 전용 (리부팅 후에도 유지), 최대 큐 크기 1000개
+  - **HTTP 연결 관리**: try-finally 블록으로 모든 연결 정리 보장
+  - **동시성 문제 해결**: @Synchronized로 큐 작업 동기화
+  - **네트워크 최적화**: 타임아웃 10초/15초로 단축
+  - **LogManager 개선**: GitHub 업로드 1분 주기, 로그 파일 크기 제한 (10MB/100MB)
+  - **Watchdog**: 10초 체크 간격 유지
+
 ### Version 1.0.41 (2025-07-29)
 - **Accessibility Service**: Implemented SnapPayAccessibilityService for automatic lockscreen dismissal on KakaoPay notifications
 - **Enhanced Lockscreen Dismissal**: Added diagonal swipe gesture that successfully unlocks Samsung devices
