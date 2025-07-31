@@ -1548,7 +1548,7 @@ class NotificationService : NotificationListenerService() {
         }
     }
     
-    // 토큰 갱신 타이머 시작 - 매시간 갱신
+    // 토큰 갱신 타이머 시작 - 매시간 갱신 (개발모드: 5분)
     @Synchronized
     private fun startTokenRefreshTimer() {
         Log.d(TAG, "Starting token refresh timer")
@@ -1556,9 +1556,16 @@ class NotificationService : NotificationListenerService() {
         tokenRefreshTimer?.cancel()
         tokenRefreshTimer = null
         
+        // 개발/프로덕션 모드에 따른 갱신 주기 설정
+        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val isProduction = prefs.getBoolean("flutter.is_production", true)
+        val refreshInterval = if (isProduction) 3600000L else 300000L // 프로덕션: 1시간, 개발: 5분
+        
+        Log.d(TAG, "Token refresh interval: ${refreshInterval / 1000}s (${if (isProduction) "PRODUCTION" else "DEVELOPMENT"} mode)")
+        
         // 새 타이머 생성
         tokenRefreshTimer = Timer("TokenRefreshTimer")
-        tokenRefreshTimer?.scheduleAtFixedRate(3600000, 3600000) { // 1시간마다 실행
+        tokenRefreshTimer?.scheduleAtFixedRate(refreshInterval, refreshInterval) {
             performTokenRefresh()
         }
     }
