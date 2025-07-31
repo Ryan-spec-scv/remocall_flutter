@@ -16,7 +16,7 @@
 
 ### App Metadata
 - **App Name**: SnapPay (리모콜)
-- **Current Version**: 1.0.41+10041
+- **Current Version**: 1.0.45+10045
 - **Package**: com.remocall.remocall_flutter
 - **Flutter SDK**: >=3.0.0 <4.0.0
 
@@ -47,6 +47,9 @@ flutter build apk --release
 
 # Using build script
 ./build_release.sh  # Creates APK with version info
+
+# Build both production and development versions
+./build_all.sh
 ```
 
 #### macOS
@@ -147,7 +150,10 @@ remocall_flutter/
 │       ├── GitHubUploader.kt       # Log upload to GitHub
 │       ├── GitHubSecrets.kt        # GitHub API credentials (gitignored)
 │       ├── NotificationServiceWatchdog.kt # Service monitoring (10s interval)
-│       └── SnapPayAccessibilityService.kt # Accessibility service for auto lockscreen unlock
+│       ├── SnapPayAccessibilityService.kt # Accessibility service for auto lockscreen unlock
+│       ├── NotificationQueueService.kt # Queue management service
+│       ├── ApiService.kt           # API communication service
+│       └── TokenManager.kt         # JWT token management
 ├── ios/                            # iOS native code
 ├── macos/                          # macOS native code  
 ├── windows/                        # Windows native code
@@ -170,6 +176,7 @@ remocall_flutter/
   - 10-second JobScheduler check interval
   - Notification queue system with retry mechanism
   - ConcurrentHashMap for thread safety
+  - Independent queue processor with Timer-based scheduling
 
 ### iOS  
 - **Notification Limitations**: Cannot directly access third-party notifications due to iOS restrictions
@@ -211,6 +218,7 @@ remocall_flutter/
 - **Android**: Native NotificationListenerService integration
 - **Cross-platform**: Flutter notification handling
 - Real-time notification processing and parsing
+- Separated queue processing from notification reception
 
 ### WebSocket Service
 - Real-time bidirectional communication
@@ -330,10 +338,16 @@ import 'package:workmanager/workmanager.dart'
 
 ## Debugging & Logging
 
-### Android Native Logging
-- `LogManager.kt` - Centralized logging system
-- Automatic log upload to GitHub for debugging
-- Notification service monitoring and diagnostics
+### Android Native Logging (v1.0.45+)
+- **Simplified Log Format**: 
+  ```
+  [알림인식] [2025-07-31 22:03:25.668] [카카오페이] [title:카카오페이 message:황보라(황*라)님이 88,000원을 보냈어요.] [extras:{"android.title":"카카오페이",...}]
+  [큐저장] [2025-07-31 22:03:25.674] [message:황보라(황*라)님이 88,000원을 보냈어요.] [큐사이즈:1]
+  ```
+- **Log Types in Korean**: 알림인식, 큐저장, 큐처리, 서버전송, 서버응답, 토큰갱신, 오류, etc.
+- **Package Names in Korean**: 카카오페이, 카카오톡, 스냅페이
+- **GitHub Upload**: Automatic upload every 1 minute to private repository
+- **File Format**: Plain text logs (.log files) with timestamp-based tracking
 
 ### Flutter Debugging
 ```bash
@@ -408,17 +422,22 @@ flutter run -d <device_id>
 
 ## Recent Updates
 
-### Version 1.0.42 (2025-07-30)
-- **NotificationService 안정성 대폭 개선**:
-  - **메모리 누수 해결**: WakeLock 10분 타임아웃, Timer 중복 생성 방지, 알림 캐시 50개 제한
-  - **무한루프 방지**: 토큰 갱신 최대 20회, 큐 아이템 최대 20회 재시도 제한
-  - **좀비 프로세스 방지**: onDestroy 자동 재시작 제거, 서비스 중복 실행 체크 추가
-  - **큐 시스템 개선**: SharedPreferences 전용 (리부팅 후에도 유지), 최대 큐 크기 1000개
-  - **HTTP 연결 관리**: try-finally 블록으로 모든 연결 정리 보장
-  - **동시성 문제 해결**: @Synchronized로 큐 작업 동기화
-  - **네트워크 최적화**: 타임아웃 10초/15초로 단축
-  - **LogManager 개선**: GitHub 업로드 1분 주기, 로그 파일 크기 제한 (10MB/100MB)
-  - **Watchdog**: 10초 체크 간격 유지
+### Version 1.0.45 (2025-07-31)
+- **Log System Simplification**:
+  - Changed log types to Korean (알림인식, 큐저장, 서버전송, etc.)
+  - Formatted log output: `[타입] [시간] [내용]` format
+  - Package names in Korean (카카오페이, 카카오톡, 스냅페이)
+  - Changed from JSON to plain text log files (.log)
+  - Removed timestamp field from JSON, kept datetime in formatted output
+  - Single-line format for better readability
+  - Extras shown only for KakaoPay notifications
+
+### Version 1.0.44 (2025-07-30)
+- **NotificationService Stability**: 
+  - Crash recovery and automatic notification recovery
+  - Separated notification reception from queue processing
+  - Independent Timer-based queue processor
+  - Fixed retry bug preventing queue processing after errors
 
 ### Version 1.0.41 (2025-07-29)
 - **Accessibility Service**: Implemented SnapPayAccessibilityService for automatic lockscreen dismissal on KakaoPay notifications
@@ -441,3 +460,8 @@ flutter run -d <device_id>
 - **Lockscreen Dismiss**: Enhanced lockscreen dismissal with KeyguardDismissCallback and additional Intent flags
 
 This guide provides comprehensive information for Claude instances working with the SnapPay Flutter codebase. The application is a production Korean fintech app with complex notification parsing requirements and multi-platform deployment needs.
+# important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
