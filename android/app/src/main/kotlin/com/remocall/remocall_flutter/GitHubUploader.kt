@@ -22,14 +22,17 @@ class GitHubUploader(private val context: Context) {
         private const val GITHUB_API_BASE = "https://api.github.com"
     }
     
-    fun uploadFile(file: File, shopCode: String): Boolean {
+    fun uploadFile(file: File, shopCode: String, isProduction: Boolean = true): Boolean {
         try {
             Log.d(TAG, "Uploading file to GitHub: ${file.name}")
             
-            // 파일 경로: logs/shopCode/YYYY-MM-DD/filename
+            // 환경별로 경로 구분: logs/environment/shopCode/YYYY-MM-DD/filename
+            val environment = if (isProduction) "production" else "development"
             val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
             val dateFolder = dateFormat.format(Date())
-            val filePath = "logs/$shopCode/$dateFolder/${file.name}"
+            val filePath = "logs/$environment/$shopCode/$dateFolder/${file.name}"
+            
+            Log.d(TAG, "Upload path: $filePath (Environment: $environment)")
             
             // 파일 내용을 Base64로 인코딩
             val fileContent = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)

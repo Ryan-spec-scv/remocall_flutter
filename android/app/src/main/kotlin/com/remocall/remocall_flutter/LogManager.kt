@@ -368,11 +368,15 @@ class LogManager(private val context: Context) {
                 }
                 Log.d(TAG, "GitHub connection test passed")
                 
+                // 프로덕션/개발 모드 확인
+                val isProduction = prefs.getBoolean("flutter.is_production", true)
+                Log.d(TAG, "Upload mode: ${if (isProduction) "PRODUCTION" else "DEVELOPMENT"}")
+                
                 // 각 파일 GitHub 업로드
                 filesToUpload.forEach { file ->
                     try {
                         Log.d(TAG, "Uploading ${file.name} to GitHub...")
-                        val success = githubUploader!!.uploadFile(file, shopCode)
+                        val success = githubUploader!!.uploadFile(file, shopCode, isProduction)
                         if (success) {
                             Log.d(TAG, "✅ Successfully uploaded ${file.name} to GitHub")
                             file.delete() // 업로드 성공 시 파일 삭제
