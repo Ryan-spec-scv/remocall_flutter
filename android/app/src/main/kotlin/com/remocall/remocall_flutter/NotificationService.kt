@@ -317,6 +317,7 @@ class NotificationService : NotificationListenerService() {
     @Volatile
     private var isRefreshingToken = false
     private val MAX_RECENT_NOTIFICATIONS = 50 // 메모리 사용량 제한
+    private var defaultUncaughtExceptionHandler: Thread.UncaughtExceptionHandler? = null
     
     @Volatile
     private var isRunning = false
@@ -381,7 +382,35 @@ class NotificationService : NotificationListenerService() {
         
         // LogManager 초기화
         logManager = LogManager.getInstance(this)
-        logManager.logServiceLifecycle("CREATED")
+        
+        // 재시작 감지 및 로깅
+        val prefs = getSharedPreferences("ServiceState", Context.MODE_PRIVATE)
+        val wasRunningBefore = prefs.getBoolean("service_was_running", false)
+        
+        if (wasRunningBefore) {
+            val lastStopReason = prefs.getString("last_stop_reason", "UNKNOWN") ?: "UNKNOWN"
+            val lastStopTime = prefs.getLong("last_stop_time", 0)
+            val timeSinceStop = System.currentTimeMillis() - lastStopTime
+            
+            logManager.logServiceLifecycle(
+                "RESTARTED", 
+                "Previous stop: $lastStopReason, ${timeSinceStop/1000}s ago"
+            )
+        } else {
+            logManager.logServiceLifecycle("CREATED")
+        }
+        
+        // 서비스 실행 상태 저장
+        prefs.edit().putBoolean("service_was_running", true).apply()
+        
+        // 크래시 핸들러 설정
+        setupCrashHandler()
+        
+        // 이전 크래시 정보 확인 및 업로드
+        checkAndUploadPreviousCrash()
+        
+        // 처리 중이던 알림 복구
+        recoverProcessingNotifications()
         
         // WakeLock 초기화 - 10분 타임아웃으로 메모리 누수 방지
         try {
@@ -1319,6 +1348,12 @@ class NotificationService : NotificationListenerService() {
                     .putString("failed_notifications", queueArray.toString())
                     .apply()
             }
+            
+            // 개별 알림 정보도 저장 (복구용)
+            val servicePrefs = getSharedPreferences("ServiceState", Context.MODE_PRIVATE)
+            servicePrefs.edit()
+                .putString("notification_${notification.id}", notification.toJson().toString())
+                .apply()
                 
             Log.d(TAG, "Saved failed notification to queue. Queue size: ${queueArray.length()}")
             
@@ -1373,6 +1408,12 @@ class NotificationService : NotificationListenerService() {
             
             prefs.edit()
                 .putString("failed_notifications", newArray.toString())
+                .apply()
+            
+            // 개별 알림 정보도 삭제 (복구용)
+            val servicePrefs = getSharedPreferences("ServiceState", Context.MODE_PRIVATE)
+            servicePrefs.edit()
+                .remove("notification_$notificationId")
                 .apply()
                 
             Log.d(TAG, "Removed notification from queue. New queue size: ${newArray.length()}")
@@ -1723,10 +1764,188 @@ class NotificationService : NotificationListenerService() {
         return false
     }
     
+    // 크래시 핸들러 설정
+    private fun setupCrashHandler() {
+        defaultUncaughtExceptionHandler = Thread.getDefaultUncaughtExceptionHandler()
+        
+        Thread.setDefaultUncaughtExceptionHandler { thread, exception ->
+            Log.e(TAG, "Uncaught exception in NotificationService", exception)
+            
+            try {
+                // 크래시 정보 저장
+                val prefs = getSharedPreferences("ServiceState", Context.MODE_PRIVATE)
+                prefs.edit()
+                    .putString("last_crash_message", exception.message ?: "No message")
+                    .putString("last_crash_stack", exception.stackTraceToString().take(5000)) // 크기 제한
+                    .putLong("last_crash_time", System.currentTimeMillis())
+                    .putString("last_stop_reason", "CRASH")
+                    .apply()
+                    
+                // 크래시 로그
+                if (exception is Exception) {
+                    logManager.logError("UNCAUGHT_EXCEPTION", exception, "Thread: ${thread.name}")
+                } else {
+                    // Throwable이지만 Exception이 아닌 경우 (Error 등)
+                    logManager.logServiceLifecycle(
+                        "UNCAUGHT_THROWABLE",
+                        "Thread: ${thread.name}, Type: ${exception.javaClass.name}, Message: ${exception.message}"
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save crash info", e)
+            }
+            
+            // 기본 핸들러 호출
+            defaultUncaughtExceptionHandler?.uncaughtException(thread, exception)
+        }
+    }
+    
+    // 이전 크래시 정보 확인 및 업로드
+    // 처리 중이던 알림 저장
+    private fun saveProcessingNotifications() {
+        try {
+            val prefs = getSharedPreferences("ServiceState", Context.MODE_PRIVATE)
+            val processingArray = JSONArray()
+            
+            processingNotifications.forEach { notificationId ->
+                processingArray.put(notificationId)
+            }
+            
+            prefs.edit()
+                .putString("processing_notifications", processingArray.toString())
+                .apply()
+                
+            Log.d(TAG, "Saved ${processingNotifications.size} processing notifications")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save processing notifications", e)
+        }
+    }
+    
+    // 처리 중이던 알림 복구
+    private fun recoverProcessingNotifications() {
+        try {
+            val prefs = getSharedPreferences("ServiceState", Context.MODE_PRIVATE)
+            val processingJson = prefs.getString("processing_notifications", "[]") ?: "[]"
+            
+            if (processingJson != "[]") {
+                val processingArray = JSONArray(processingJson)
+                var recoveredCount = 0
+                
+                for (i in 0 until processingArray.length()) {
+                    val notificationId = processingArray.getString(i)
+                    
+                    // 큐에 저장된 알림 정보 복구
+                    val notificationJson = prefs.getString("notification_$notificationId", null)
+                    if (notificationJson != null) {
+                        try {
+                            val notificationData = JSONObject(notificationJson)
+                            
+                            // FailedNotification 객체로 복구
+                            val recovered = FailedNotification(
+                                id = notificationId,
+                                message = notificationData.getString("message"),
+                                shopCode = notificationData.optString("shopCode", ""),
+                                timestamp = notificationData.optLong("timestamp", System.currentTimeMillis()),
+                                retryCount = notificationData.optInt("retryCount", 0) + 1, // 재시도 횟수 증가
+                                lastRetryTime = System.currentTimeMillis(),
+                                createdAt = notificationData.optLong("createdAt", System.currentTimeMillis()),
+                                nextRetryTime = System.currentTimeMillis() + getRetryDelay(notificationData.optInt("retryCount", 0) + 1)
+                            )
+                            
+                            // 24시간 이내의 알림만 복구
+                            if (System.currentTimeMillis() - recovered.timestamp < 24 * 60 * 60 * 1000) {
+                                // 큐에 다시 저장
+                                saveFailedNotification(recovered)
+                                recoveredCount++
+                                Log.d(TAG, "Recovered notification: $notificationId (retry count: ${recovered.retryCount})")
+                            } else {
+                                Log.d(TAG, "Skipped old notification: $notificationId")
+                                // 오래된 알림 정보 삭제
+                                prefs.edit().remove("notification_$notificationId").apply()
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to recover notification $notificationId", e)
+                            // 복구 실패한 알림 정보 삭제
+                            prefs.edit().remove("notification_$notificationId").apply()
+                        }
+                    }
+                }
+                
+                // 복구 완료 로그
+                if (recoveredCount > 0) {
+                    Log.d(TAG, "Recovered $recoveredCount notifications to queue")
+                    
+                    logManager.logServiceLifecycle(
+                        "NOTIFICATIONS_RECOVERED",
+                        "Count: $recoveredCount"
+                    )
+                    
+                    // 큐 처리 시작
+                    if (!isProcessingQueue) {
+                        startQueueProcessing()
+                    }
+                }
+                
+                // 처리 중 목록 초기화
+                prefs.edit().remove("processing_notifications").apply()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to recover processing notifications", e)
+        }
+    }
+    
+    private fun checkAndUploadPreviousCrash() {
+        try {
+            val prefs = getSharedPreferences("ServiceState", Context.MODE_PRIVATE)
+            val lastCrashTime = prefs.getLong("last_crash_time", 0)
+            
+            if (lastCrashTime > 0) {
+                val crashMessage = prefs.getString("last_crash_message", "") ?: ""
+                val crashStack = prefs.getString("last_crash_stack", "") ?: ""
+                val timeSinceCrash = System.currentTimeMillis() - lastCrashTime
+                
+                Log.w(TAG, "Previous crash detected: $crashMessage")
+                
+                // 크래시 정보를 로그에 기록
+                logManager.logServiceLifecycle(
+                    "CRASH_RECOVERY",
+                    "Message: $crashMessage, Time: ${timeSinceCrash/1000}s ago"
+                )
+                
+                // 스택 트레이스는 별도 에러 로그로
+                if (crashStack.isNotEmpty()) {
+                    logManager.logError(
+                        "PREVIOUS_CRASH_STACK",
+                        Exception("Previous crash: $crashMessage"),
+                        "Stack: $crashStack"
+                    )
+                }
+                
+                // 크래시 정보 초기화
+                prefs.edit()
+                    .remove("last_crash_time")
+                    .remove("last_crash_message")
+                    .remove("last_crash_stack")
+                    .apply()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking previous crash", e)
+        }
+    }
+    
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
-        logManager.logServiceLifecycle("DESTROYED")
+        
+        // 종료 이유 기록
+        val prefs = getSharedPreferences("ServiceState", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean("service_was_running", false)
+            .putString("last_stop_reason", "NORMAL_STOP")
+            .putLong("last_stop_time", System.currentTimeMillis())
+            .apply()
+            
+        logManager.logServiceLifecycle("DESTROYED", "Normal shutdown")
         
         retryTimer?.cancel()
         healthCheckTimer?.cancel()
