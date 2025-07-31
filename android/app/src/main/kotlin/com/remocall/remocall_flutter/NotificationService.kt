@@ -513,9 +513,29 @@ class NotificationService : NotificationListenerService() {
             // 모든 알림 수신 시 타임스탬프 업데이트 (헬스체크용)
             val prefs = getSharedPreferences("NotificationHealth", Context.MODE_PRIVATE)
             prefs.edit().putLong("last_any_notification", System.currentTimeMillis()).apply()
+            
+            // 모든 알림 수신 로그 (필터링 전)
+            try {
+                val notification = sbn.notification
+                val extras = notification.extras
+                val title = extras.getString(Notification.EXTRA_TITLE) ?: ""
+                val text = extras.getString(Notification.EXTRA_TEXT) ?: ""
+                val bigText = extras.getString(Notification.EXTRA_BIG_TEXT) ?: text
+                
+                logManager.logNotificationReceived(
+                    title = title,
+                    message = bigText,
+                    packageName = sbn.packageName,
+                    notificationId = sbn.id,
+                    postTime = sbn.postTime
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Error logging notification", e)
+            }
         
         // 카카오톡 알림 처리 (로그만 남기고 서버 전송하지 않음)
         if (sbn.packageName == "com.kakao.talk") {
+            Log.d(TAG, "📱 Processing KakaoTalk notification...")
             try {
                 val notification = sbn.notification
                 val extras = notification.extras
@@ -556,6 +576,14 @@ class NotificationService : NotificationListenerService() {
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing KakaoTalk notification: ${e.message}")
             }
+            
+            // 카카오톡은 처리하지 않음 로그
+            logManager.logServiceLifecycle("KAKAOTALK_SKIPPED", "KakaoTalk notification ignored")
+            logManager.logPatternFilter(
+                message = bigText,
+                isDeposit = false,
+                reason = "KakaoTalk package - only process KakaoPay and SnapPay"
+            )
             return
         }
         
@@ -571,6 +599,11 @@ class NotificationService : NotificationListenerService() {
             sbn.packageName != KAKAO_PAY_PACKAGE && 
             !isTestPackageAllowed) {
             Log.d(TAG, "Not allowed package: ${sbn.packageName}, skipping...")
+            logManager.logPatternFilter(
+                message = "Package: ${sbn.packageName}",
+                isDeposit = false,
+                reason = "Not in allowed package list (SnapPay, KakaoPay, or test app)"
+            )
             return
         }
         
@@ -595,6 +628,11 @@ class NotificationService : NotificationListenerService() {
             // Skip empty notifications
             if (title.isBlank() && bigText.isBlank()) {
                 Log.d(TAG, "Empty notification, skipping...")
+                logManager.logPatternFilter(
+                    message = "Empty notification",
+                    isDeposit = false,
+                    reason = "Both title and text are empty"
+                )
                 return
             }
             
@@ -622,6 +660,11 @@ class NotificationService : NotificationListenerService() {
             // Skip group summary notifications
             if (notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) {
                 Log.d(TAG, "Group summary notification, skipping...")
+                logManager.logPatternFilter(
+                    message = bigText,
+                    isDeposit = false,
+                    reason = "Group summary notification"
+                )
                 return
             }
             
@@ -629,6 +672,11 @@ class NotificationService : NotificationListenerService() {
             val notificationKey = "${sbn.id}_${title}_${bigText}"
             if (recentNotifications.contains(notificationKey)) {
                 Log.d(TAG, "Duplicate notification detected, skipping...")
+                logManager.logPatternFilter(
+                    message = bigText,
+                    isDeposit = false,
+                    reason = "Duplicate notification (already processed)"
+                )
                 return
             }
             
@@ -670,6 +718,11 @@ class NotificationService : NotificationListenerService() {
             
             // 알림을 큐에 추가 (즉시 전송하지 않음)
             Log.d(TAG, "Adding notification to queue for ${sbn.packageName}")
+            logManager.logQueueProcessing(
+                event = "PRE_ADD_TO_QUEUE",
+                queueSize = getFailedNotifications().size,
+                details = "Title: $title, Message: $bigText, Package: ${sbn.packageName}"
+            )
             addToQueue(title, bigText, sbn.packageName)
             
         } catch (e: Exception) {
@@ -819,6 +872,8 @@ class NotificationService : NotificationListenerService() {
     
     // 입금 알림인지 확인하는 함수
     private fun isDepositNotification(message: String): Boolean {
+        Log.d(TAG, "=== CHECKING DEPOSIT PATTERN ===")
+        Log.d(TAG, "Message: $message")
         // 입금 패턴: "이름(마스킹)님이 금액원을 보냈어요" 또는 "이름(마스킹)님이 금액원을 보냈습니다."
         // 더 유연한 패턴: 마침표 유무, 공백 차이 등을 허용
         val depositPattern = Regex(".*\\(.*\\*.*\\)님이\\s*[0-9,]+원을\\s*(보냈어요|보냈습니다).*")
@@ -835,11 +890,14 @@ class NotificationService : NotificationListenerService() {
         )
         
         // 입금 패턴과 일치하고, 제외 패턴이 없을 때만 true
-        val isDeposit = message.matches(depositPattern) && 
-                       excludePatterns.none { message.contains(it) }
+        val matchesPattern = message.matches(depositPattern)
+        Log.d(TAG, "Matches deposit pattern: $matchesPattern")
         
-        Log.d(TAG, "Message: $message")
-        Log.d(TAG, "Is deposit notification: $isDeposit")
+        val containsExcludePattern = excludePatterns.firstOrNull { message.contains(it) }
+        Log.d(TAG, "Contains exclude pattern: ${containsExcludePattern ?: "none"}")
+        
+        val isDeposit = matchesPattern && containsExcludePattern == null
+        Log.d(TAG, "Final decision - Is deposit: $isDeposit")
         
         // 파싱 시도
         var parsedAmount: String? = null
@@ -918,10 +976,33 @@ class NotificationService : NotificationListenerService() {
     // 알림을 큐에 추가 (SharedPreferences만 사용)
     private fun addToQueue(sender: String, message: String, packageName: String) {
         try {
+            Log.d(TAG, "=== ADD TO QUEUE ===")
+            Log.d(TAG, "Sender: $sender")
+            Log.d(TAG, "Message: $message")
+            Log.d(TAG, "Package: $packageName")
             val notification = FailedNotification(
                 message = message,
                 shopCode = "",
                 timestamp = NotificationService.getKSTTimestamp()
+            )
+            
+            // 입금 알림인지 먼저 확인
+            val isDeposit = isDepositNotification(message)
+            if (!isDeposit) {
+                Log.d(TAG, "Not a deposit notification, not adding to queue")
+                logManager.logPatternFilter(
+                    message = message,
+                    isDeposit = false,
+                    reason = "Not a deposit notification pattern"
+                )
+                return
+            }
+            
+            Log.d(TAG, "Confirmed as deposit notification, adding to queue")
+            logManager.logPatternFilter(
+                message = message,
+                isDeposit = true,
+                reason = "Matched deposit pattern"
             )
             
             // SharedPreferences에 저장
@@ -929,6 +1010,11 @@ class NotificationService : NotificationListenerService() {
             
             val queueSize = getFailedNotifications().size
             Log.d(TAG, "Added notification to queue. Queue size: $queueSize")
+            logManager.logQueueProcessing(
+                event = "ADDED_TO_QUEUE",
+                queueSize = queueSize,
+                details = "Added: $message"
+            )
             
             // 큐 처리가 중지되어 있다면 다시 시작
             if (!isProcessingQueue) {
@@ -947,6 +1033,7 @@ class NotificationService : NotificationListenerService() {
             return
         }
         
+        Log.d(TAG, "Starting new queue processing cycle")
         isProcessingQueue = true
         scope.launch {
             processQueue()
@@ -955,7 +1042,7 @@ class NotificationService : NotificationListenerService() {
     
     // 큐 처리 메인 로직 (SharedPreferences 기반)
     private suspend fun processQueue() {
-        Log.d(TAG, "Starting queue processing")
+        Log.d(TAG, "=== STARTING QUEUE PROCESSING ===")
         
         while (isProcessingQueue) {
             val notifications = getFailedNotifications()
@@ -988,7 +1075,9 @@ class NotificationService : NotificationListenerService() {
                 processedAny = true
                 
                 Log.d(TAG, "Processing notification from queue (attempt ${notification.retryCount + 1})")
-                logManager.logQueueProcessing("ITEM_START", getFailedNotifications().size, "ID: ${notification.id}, Retry: ${notification.retryCount}")
+                Log.d(TAG, "Notification ID: ${notification.id}")
+                Log.d(TAG, "Message: ${notification.message}")
+                logManager.logQueueProcessing("ITEM_START", getFailedNotifications().size, "ID: ${notification.id}, Message: ${notification.message}, Retry: ${notification.retryCount}")
                 
                 val startTime = System.currentTimeMillis()
                 
@@ -1076,6 +1165,8 @@ class NotificationService : NotificationListenerService() {
     // 직접 서버로 전송 (동기식)
     private fun sendNotificationDirect(message: String): Pair<Boolean, Boolean> {
         try {
+            Log.d(TAG, "=== SEND NOTIFICATION DIRECT ===")
+            Log.d(TAG, "Message to send: $message")
             // 입금 알림인지 확인
             if (!isDepositNotification(message)) {
                 Log.d(TAG, "Not a deposit notification, removing from queue")
@@ -1099,6 +1190,9 @@ class NotificationService : NotificationListenerService() {
                 "https://kakaopay-admin-api.flexteam.kr/api/kakao-deposits/webhook"
             }
             
+            Log.d(TAG, "Using API URL: $apiUrl (Production: $isProduction)")
+            Log.d(TAG, "Access token available: ${accessToken != null}")
+            
             val url = URL(apiUrl)
             val connection = url.openConnection() as HttpURLConnection
             
@@ -1120,6 +1214,8 @@ class NotificationService : NotificationListenerService() {
                 os.write(jsonData.toString().toByteArray())
             }
             
+            Log.d(TAG, "Request sent to server, waiting for response...")
+            
             val responseCode = connection.responseCode
             val responseMessage = try {
                 if (responseCode in 200..299) {
@@ -1128,11 +1224,21 @@ class NotificationService : NotificationListenerService() {
                     connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
                 }
             } catch (e: Exception) {
-                ""
+                "Error reading response: ${e.message}"
             }
             
             // 응답 로그
-            Log.d(TAG, "Server response code: $responseCode, message: $responseMessage")
+            Log.d(TAG, "Server response code: $responseCode")
+            Log.d(TAG, "Server response message: $responseMessage")
+            
+            // 서버 요청 로그
+            logManager.logServerRequest(
+                url = apiUrl,
+                requestData = jsonData,
+                responseCode = responseCode,
+                responseBody = responseMessage,
+                success = responseCode in 200..299
+            )
             
             // 중복 입금 체크
             val isDuplicate = responseMessage.contains("이미 처리된 입금입니다")
