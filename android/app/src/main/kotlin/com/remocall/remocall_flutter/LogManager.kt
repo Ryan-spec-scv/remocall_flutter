@@ -64,6 +64,7 @@ class LogManager(private val context: Context) {
     fun logServiceLifecycle(event: String, details: String = "") {
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "SERVICE_LIFECYCLE")
             put("event", event)
             put("details", details)
@@ -81,6 +82,7 @@ class LogManager(private val context: Context) {
     ) {
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "NOTIFICATION_RECEIVED")
             put("packageName", packageName)
             put("notificationId", notificationId)
@@ -95,6 +97,7 @@ class LogManager(private val context: Context) {
     fun logPatternFilter(message: String, isDeposit: Boolean, reason: String = "") {
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "PATTERN_FILTER")
             put("message", message)
             put("isDeposit", isDeposit)
@@ -113,6 +116,7 @@ class LogManager(private val context: Context) {
     ) {
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "SERVER_REQUEST")
             put("url", url)
             put("request", requestData)
@@ -133,6 +137,7 @@ class LogManager(private val context: Context) {
     ) {
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "FAILED_QUEUE")
             put("action", action)
             put("notificationId", notificationId)
@@ -147,6 +152,7 @@ class LogManager(private val context: Context) {
     fun logTokenRefresh(success: Boolean, errorMessage: String = "") {
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "TOKEN_REFRESH")
             put("success", success)
             if (!success) put("error", errorMessage)
@@ -158,6 +164,7 @@ class LogManager(private val context: Context) {
     fun logQueueProcessing(event: String, queueSize: Int, details: String = "") {
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "QUEUE_PROCESSING")
             put("event", event) // "START", "COMPLETE", "ITEM_START", "ITEM_COMPLETE", "ITEM_FAILED"
             put("queueSize", queueSize)
@@ -176,6 +183,7 @@ class LogManager(private val context: Context) {
     ) {
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "NOTIFICATION_PARSING")
             put("originalMessage", originalMessage)
             put("parsedAmount", parsedAmount ?: "null")
@@ -195,6 +203,7 @@ class LogManager(private val context: Context) {
     ) {
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "SERVER_RESPONSE_DETAIL")
             put("matchStatus", matchStatus)
             put("transactionId", transactionId ?: "null")
@@ -208,6 +217,7 @@ class LogManager(private val context: Context) {
     fun logError(location: String, error: Exception, context: String = "") {
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "ERROR")
             put("location", location)
             put("errorMessage", error.message ?: "Unknown error")
@@ -227,6 +237,7 @@ class LogManager(private val context: Context) {
     ) {
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "HEALTH_CHECK")
             put("lastNotificationTime", lastNotificationTime)
             put("timeSinceLastNotification", System.currentTimeMillis() - lastNotificationTime)
@@ -248,6 +259,7 @@ class LogManager(private val context: Context) {
         val processingTime = endTime - startTime
         val log = JSONObject().apply {
             put("timestamp", System.currentTimeMillis())
+            put("datetime", dateFormat.format(Date()))
             put("type", "QUEUE_ITEM_TIMING")
             put("notificationId", notificationId)
             put("processingTimeMs", processingTime)
