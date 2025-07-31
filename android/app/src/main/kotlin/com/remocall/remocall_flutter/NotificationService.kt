@@ -579,11 +579,6 @@ class NotificationService : NotificationListenerService() {
             
             // 카카오톡은 처리하지 않음 로그
             logManager.logServiceLifecycle("KAKAOTALK_SKIPPED", "KakaoTalk notification ignored")
-            logManager.logPatternFilter(
-                message = bigText,
-                isDeposit = false,
-                reason = "KakaoTalk package - only process KakaoPay and SnapPay"
-            )
             return
         }
         
