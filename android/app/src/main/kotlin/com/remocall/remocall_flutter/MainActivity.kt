@@ -751,26 +751,25 @@ class MainActivity : FlutterActivity() {
                     return@launch
                 }
                 
-                // 공통 함수 사용 (KST 타임스탬프 자동 적용)
-                NotificationService.sendNotificationToServer(
-                    context = this@MainActivity,
-                    message = message,
-                    accessToken = accessToken,
-                    onResult = { success, responseMessage ->
-                        // 파싱된 응답으로 Flutter에 결과 전달
-                        result.success(mapOf(
-                            "success" to success,
-                            "message" to responseMessage,
-                            "matchStatus" to when {
-                                responseMessage.contains("매칭되어 거래가 완료") -> "matched"
-                                responseMessage.contains("새 거래를 자동으로 생성") -> "auto_created"
-                                responseMessage.contains("이미 처리된") -> "duplicate"
-                                responseMessage.contains("실패") -> "failed"
-                                else -> "unknown"
-                            }
-                        ))
+                // ApiService 사용
+                val apiService = ApiService.getInstance(this@MainActivity)
+                val (success, isDuplicate) = apiService.sendNotification(message)
+                
+                val responseMessage = when {
+                    success && isDuplicate -> "이미 처리된 알림입니다"
+                    success -> "알림이 성공적으로 전송되었습니다"
+                    else -> "알림 전송에 실패했습니다"
+                }
+                // 파싱된 응답으로 Flutter에 결과 전달
+                result.success(mapOf(
+                    "success" to success,
+                    "message" to responseMessage,
+                    "matchStatus" to when {
+                        isDuplicate -> "duplicate"
+                        success -> "matched"
+                        else -> "failed"
                     }
-                )
+                ))
                 
                 Log.d(TAG, "=== SEND TEST WEBHOOK END ===")
                 

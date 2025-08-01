@@ -439,6 +439,22 @@ flutter run -d <device_id>
   - Independent Timer-based queue processor
   - Fixed retry bug preventing queue processing after errors
 
+### Version 1.0.45 (2025-08-01)
+- **메모리 효율성 대폭 개선**:
+  - 정상 알림은 로그 기록하지 않음 (메모리/저장공간 절약)
+  - 비정상 알림(데이터 손실)만 로그 기록
+  - 로그 타입을 13가지에서 3가지로 단순화 (비정상알림, 시스템오류, 중요이벤트)
+  - GitHub 업로드 후 로컬 파일 즉시 삭제
+  - 주기적 업로드 제거 - 비정상 상황 시에만 업로드
+  - 로컬 로그 파일 제한: 최대 5MB, 1일 이상 된 파일 자동 삭제
+  - 전체 로그 저장 공간 제한: 10MB
+- **시스템 모니터링 강화**:
+  - 비정상 알림 발생 시 메모리 상태 수집 (JVM/System)
+  - 메모리 부족 상황 자동 감지 및 기록
+- **로그 최적화**:
+  - 단순한 텍스트 형식으로 변경 (JSON 파싱 오버헤드 제거)
+  - 이모지로 로그 타입 구분 (⚠️ 비정상알림, 🔴 시스템오류, 📌 중요이벤트)
+
 ### Version 1.0.41 (2025-07-29)
 - **Accessibility Service**: Implemented SnapPayAccessibilityService for automatic lockscreen dismissal on KakaoPay notifications
 - **Enhanced Lockscreen Dismissal**: Added diagonal swipe gesture that successfully unlocks Samsung devices

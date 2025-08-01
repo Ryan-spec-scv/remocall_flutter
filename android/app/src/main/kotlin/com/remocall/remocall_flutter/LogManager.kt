@@ -12,6 +12,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import android.util.Base64
 import java.io.FileInputStream
+import java.util.Collections
 
 class LogManager(private val context: Context) {
     
@@ -29,11 +30,17 @@ class LogManager(private val context: Context) {
     }
     
     private val logDir: File = File(context.filesDir, LOG_DIR)
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
-    private val fileNameFormat = SimpleDateFormat("yyyy-MM-dd_HH", Locale.getDefault())
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault()).apply {
+        timeZone = TimeZone.getTimeZone("Asia/Seoul")
+    }
+    private val fileNameFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).apply {
+        timeZone = TimeZone.getTimeZone("Asia/Seoul")
+    }
     private var currentLogFile: File? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var githubUploader: GitHubUploader? = null
+    private val uploadTrackingPrefs = context.getSharedPreferences("LogUploadTracking", Context.MODE_PRIVATE)
+    private val pendingLogs = Collections.synchronizedList(mutableListOf<JSONObject>())  // 업로드 대기중인 로그
     
     init {
         if (!logDir.exists()) {
@@ -48,255 +55,128 @@ class LogManager(private val context: Context) {
             Log.e(TAG, "Failed to initialize GitHubUploader", e)
         }
         
-        // 매 시간마다 GitHub 업로드 타이머 설정
-        scheduleHourlyUpload()
+        // 주기적 업로드 제거 - 비정상 상황 시에만 업로드
         
-        // 주기적으로 오래된 로그 정리
+        // 주기적으로 오래된 로그 정리 (더 자주)
         scope.launch {
             while (isActive) {
                 cleanOldLogs()
-                delay(24 * 60 * 60 * 1000L) // 하루에 한 번
+                delay(60 * 60 * 1000L) // 1시간마다
             }
         }
     }
     
-    // 서비스 생명주기 로그
+    // 중요 이벤트 로그 (서비스 시작/종료만)
     fun logServiceLifecycle(event: String, details: String = "") {
-        val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "SERVICE_LIFECYCLE")
-            put("event", event)
-            put("details", details)
+        // 서비스 시작/종료만 로그 기록
+        if (event == "CREATED" || event == "DESTROYED") {
+            val log = JSONObject().apply {
+                put("type", "중요이벤트")
+                put("event", event)
+                if (details.isNotEmpty()) put("details", details)
+            }
+            writeLog(log)
         }
-        writeLog(log)
     }
     
-    // 카카오페이 알림 수신 로그
-    fun logNotificationReceived(
-        title: String,
-        message: String,
+    // 비정상 알림 로그 (데이터가 손실된 알림만)
+    fun logAbnormalNotification(
         packageName: String,
         notificationId: Int,
-        postTime: Long
+        postTime: Long,
+        extras: JSONObject? = null,
+        memoryInfo: JSONObject? = null
     ) {
+        val simplifiedPackageName = when(packageName) {
+            "com.kakaopay.app" -> "카카오페이"
+            "com.kakao.talk" -> "카카오톡"
+            "com.remocall.remocall_flutter" -> "스냅페이"
+            else -> packageName
+        }
+        
         val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "NOTIFICATION_RECEIVED")
-            put("packageName", packageName)
-            put("notificationId", notificationId)
-            put("postTime", postTime)
-            put("title", title)
-            put("message", message)
+            put("type", "비정상알림")
+            put("앱", simplifiedPackageName)
+            put("알림ID", notificationId)
+            put("발생시간", dateFormat.format(Date(postTime)))
+            if (extras != null && extras.length() > 0) {
+                put("추가정보", extras)
+            }
+            if (memoryInfo != null) {
+                put("메모리상태", memoryInfo)
+            }
         }
         writeLog(log)
+        
+        // 비정상 상황 발생 시 즉시 업로드
+        triggerImmediateUpload()
     }
     
-    // 알림 패턴 필터링 결과 로그
-    fun logPatternFilter(message: String, isDeposit: Boolean, reason: String = "") {
-        val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "PATTERN_FILTER")
-            put("message", message)
-            put("isDeposit", isDeposit)
-            put("reason", reason)
-        }
-        writeLog(log)
-    }
+    // 패턴 필터링 로그 - 제거 (불필요)
     
-    // 서버 전송 로그
-    fun logServerRequest(
-        url: String,
-        requestData: JSONObject,
-        responseCode: Int,
-        responseBody: String,
-        success: Boolean
-    ) {
-        val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "SERVER_REQUEST")
-            put("url", url)
-            put("request", requestData)
-            put("responseCode", responseCode)
-            put("responseBody", responseBody)
-            put("success", success)
-        }
-        writeLog(log)
-    }
+    // 서버 전송 로그 - 제거 (불필요)
     
-    // 실패 큐 로그
-    fun logFailedQueue(
-        action: String, // "ADD", "RETRY", "REMOVE"
-        notificationId: String,
-        message: String,
-        retryCount: Int,
-        queueSize: Int
-    ) {
-        val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "FAILED_QUEUE")
-            put("action", action)
-            put("notificationId", notificationId)
-            put("message", message)
-            put("retryCount", retryCount)
-            put("queueSize", queueSize)
-        }
-        writeLog(log)
-    }
+    // 실패 큐 로그 - 제거 (불필요)
     
-    // 토큰 갱신 로그
-    fun logTokenRefresh(success: Boolean, errorMessage: String = "") {
-        val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "TOKEN_REFRESH")
-            put("success", success)
-            if (!success) put("error", errorMessage)
-        }
-        writeLog(log)
-    }
+    // 토큰 갱신 로그 - 제거 (불필요)
     
-    // 큐 처리 시작/완료 로그
-    fun logQueueProcessing(event: String, queueSize: Int, details: String = "") {
-        val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "QUEUE_PROCESSING")
-            put("event", event) // "START", "COMPLETE", "ITEM_START", "ITEM_COMPLETE", "ITEM_FAILED"
-            put("queueSize", queueSize)
-            put("details", details)
-        }
-        writeLog(log)
-    }
+    // 큐 처리 로그 - 제거 (불필요)
     
-    // 알림 파싱 상세 로그
-    fun logNotificationParsing(
-        originalMessage: String,
-        parsedAmount: String?,
-        parsedSender: String?,
-        isDeposit: Boolean,
-        parseResult: String
-    ) {
-        val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "NOTIFICATION_PARSING")
-            put("originalMessage", originalMessage)
-            put("parsedAmount", parsedAmount ?: "null")
-            put("parsedSender", parsedSender ?: "null")
-            put("isDeposit", isDeposit)
-            put("parseResult", parseResult)
-        }
-        writeLog(log)
-    }
+    // 알림 파싱 로그 - 제거 (불필요)
     
-    // 서버 응답 상세 로그 (기존 메소드 확장)
-    fun logServerResponseDetail(
-        matchStatus: String,
-        transactionId: String?,
-        depositId: String?,
-        errorDetail: String?
-    ) {
-        val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "SERVER_RESPONSE_DETAIL")
-            put("matchStatus", matchStatus)
-            put("transactionId", transactionId ?: "null")
-            put("depositId", depositId ?: "null")
-            put("errorDetail", errorDetail ?: "null")
-        }
-        writeLog(log)
-    }
+    // 서버 응답 로그 - 제거 (불필요)
     
-    // 에러 로그 (스택 트레이스 포함)
+    // 시스템 오류 로그
     fun logError(location: String, error: Exception, context: String = "") {
         val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "ERROR")
-            put("location", location)
-            put("errorMessage", error.message ?: "Unknown error")
-            put("errorClass", error.javaClass.simpleName)
-            put("stackTrace", error.stackTraceToString())
-            put("context", context)
+            put("type", "시스템오류")
+            put("위치", location)
+            put("메시지", error.message ?: "Unknown error")
+            put("클래스", error.javaClass.simpleName)
+            if (context.isNotEmpty()) put("상황", context)
         }
         writeLog(log)
+        
+        // 시스템 오류 발생 시 즉시 업로드
+        triggerImmediateUpload()
     }
     
-    // 서비스 헬스체크 로그
-    fun logHealthCheck(
-        lastNotificationTime: Long,
-        isServiceRunning: Boolean,
-        hasNotificationPermission: Boolean,
-        queueSize: Int
-    ) {
-        val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "HEALTH_CHECK")
-            put("lastNotificationTime", lastNotificationTime)
-            put("timeSinceLastNotification", System.currentTimeMillis() - lastNotificationTime)
-            put("isServiceRunning", isServiceRunning)
-            put("hasNotificationPermission", hasNotificationPermission)
-            put("queueSize", queueSize)
-        }
-        writeLog(log)
-    }
+    // 서비스 헬스체크 로그 - 제거 (불필요)
     
-    // 큐 처리 시간 측정 로그
-    fun logQueueItemTiming(
-        notificationId: String,
-        startTime: Long,
-        endTime: Long,
-        success: Boolean,
-        retryCount: Int
-    ) {
-        val processingTime = endTime - startTime
-        val log = JSONObject().apply {
-            put("timestamp", System.currentTimeMillis())
-            put("datetime", dateFormat.format(Date()))
-            put("type", "QUEUE_ITEM_TIMING")
-            put("notificationId", notificationId)
-            put("processingTimeMs", processingTime)
-            put("success", success)
-            put("retryCount", retryCount)
-        }
-        writeLog(log)
-    }
+    // 큐 처리 시간 로그 - 제거 (불필요)
     
     private fun writeLog(logData: JSONObject) {
         scope.launch {
             try {
                 val now = Date()
-                val hourFormat = SimpleDateFormat("yyyy-MM-dd_HH", Locale.getDefault())
-                val minuteFormat = SimpleDateFormat("mm", Locale.getDefault())
-                val currentHour = hourFormat.format(now)
-                val minute = minuteFormat.format(now).toInt()
-                val segment = minute / 10  // 0-5 for each 10-minute segment
-                val logFileName = "log_${currentHour}_${segment}.json"
+                val dateStr = fileNameFormat.format(now)  // yyyy-MM-dd 형식
+                val logFileName = "${dateStr}.log"
                 
                 if (currentLogFile?.name != logFileName) {
                     currentLogFile = File(logDir, logFileName)
                 }
                 
-                // 파일 크기 체크 (10MB 제한)
-                if (currentLogFile!!.exists() && currentLogFile!!.length() > 10 * 1024 * 1024) {
-                    Log.w(TAG, "Log file size exceeds 10MB, creating new file")
-                    val timestamp = System.currentTimeMillis()
-                    currentLogFile = File(logDir, "log_${currentHour}_${segment}_$timestamp.json")
+                // 파일 크기 체크 (5MB 제한)
+                if (currentLogFile!!.exists() && currentLogFile!!.length() > 5 * 1024 * 1024) {
+                    Log.w(TAG, "Log file size exceeds 5MB, triggering immediate upload")
+                    triggerImmediateUpload()
+                    return@launch  // 업로드 후 새 파일에 기록되도록
                 }
                 
-                // 로그 추가 (한 줄에 하나의 JSON)
-                val logLine = logData.toString() + "\n"
-                currentLogFile!!.appendText(logLine)
+                // 포맷된 로그 라인 생성
+                val datetime = dateFormat.format(now)
+                val type = logData.getString("type")
+                val formattedLog = formatLogLine(type, datetime, logData)
+                
+                // 로그 추가
+                currentLogFile!!.appendText(formattedLog + "\n")
+                
+                // 타임스탬프 추가하여 업로드 대기 목록에 추가
+                logData.put("timestamp", now.time)
+                pendingLogs.add(logData)
                 
                 // 디버그용 로그 출력
-                Log.d(TAG, "Log written: ${logData.getString("type")}")
+                Log.d(TAG, "Log written: $type")
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error writing log", e)
@@ -304,14 +184,7 @@ class LogManager(private val context: Context) {
         }
     }
     
-    private fun scheduleHourlyUpload() {
-        scope.launch {
-            while (isActive) {
-                delay(600000) // 10분
-                uploadToGitHub()
-            }
-        }
-    }
+    // 주기적 업로드 제거 - 사용하지 않음
     
     private suspend fun uploadToGitHub() {
         withContext(Dispatchers.IO) {
@@ -346,18 +219,89 @@ class LogManager(private val context: Context) {
                 // 수동 업로드인 경우 모든 파일 업로드 (테스트용)
                 Log.d(TAG, "Manual upload - uploading all files")
                 
-                val filesToUpload = logDir.listFiles()?.filter { file ->
-                    file.name.endsWith(".json")
-                } ?: emptyList()
+                // 마지막 업로드 시간 확인
+                val lastUploadTimestamp = uploadTrackingPrefs.getLong("last_uploaded_timestamp", 0L)
+                val lastUploadDate = uploadTrackingPrefs.getString("last_uploaded_date", "") ?: ""
+                val currentDate = fileNameFormat.format(Date())
                 
-                if (filesToUpload.isEmpty()) {
-                    Log.d(TAG, "No log files to upload")
-                    return@withContext
+                Log.d(TAG, "Last upload timestamp: $lastUploadTimestamp, date: $lastUploadDate")
+                Log.d(TAG, "Current date: $currentDate")
+                
+                // 날짜가 변경되었으면 새로운 파일로 시작
+                val isNewDay = lastUploadDate != currentDate
+                if (isNewDay) {
+                    Log.d(TAG, "New day detected, will create new file")
                 }
                 
-                Log.d(TAG, "Found ${filesToUpload.size} files to upload for shop: $shopCode")
-                filesToUpload.forEach { file ->
-                    Log.d(TAG, "Will upload: ${file.name}")
+                // 프로덕션/개발 모드 확인
+                val isProduction = prefs.getBoolean("flutter.is_production", true)
+                Log.d(TAG, "Upload mode: ${if (isProduction) "PRODUCTION" else "DEVELOPMENT"}")
+                
+                // 업로드할 로그 준비
+                val logsToUpload = mutableListOf<JSONObject>()
+                
+                // 오늘 날짜의 로그 파일 찾기
+                val today = fileNameFormat.format(Date())
+                val todayFiles = logDir.listFiles()?.filter { file ->
+                    file.name.startsWith(today) && (file.name.endsWith(".log") || file.name.endsWith(".json"))
+                } ?: emptyList()
+                
+                // 포맷된 로그 파일 처리 (.log 파일)
+                val logFile = todayFiles.find { it.name.endsWith(".log") }
+                if (logFile != null && logFile.exists()) {
+                    try {
+                        // 파일 전체를 읽어서 업로드 (timestamp 기반 필터링 안 함)
+                        val logContent = logFile.readText()
+                        if (logContent.isNotEmpty()) {
+                            // 로그를 직접 업로드
+                            Log.d(TAG, "Found log file with ${logFile.length()} bytes")
+                            
+                            // 임시 파일 생성
+                            val tempFile = File(logDir, "upload_temp_${System.currentTimeMillis()}.log")
+                            tempFile.writeText(logContent)
+                            
+                            try {
+                                Log.d(TAG, "Uploading to GitHub...")
+                                val success = githubUploader!!.uploadFile(
+                                    file = tempFile,
+                                    shopCode = shopCode,
+                                    isProduction = isProduction,
+                                    isNewDay = isNewDay,
+                                    lastUploadTimestamp = System.currentTimeMillis()
+                                )
+                                
+                                if (success) {
+                                    Log.d(TAG, "✅ Successfully uploaded to GitHub")
+                                    
+                                    // 업로드 성공 시 추적 정보 업데이트
+                                    uploadTrackingPrefs.edit()
+                                        .putLong("last_uploaded_timestamp", System.currentTimeMillis())
+                                        .putString("last_uploaded_date", currentDate)
+                                        .apply()
+                                    
+                                    Log.d(TAG, "Updated last upload timestamp")
+                                    
+                                    // 업로드 완료 후 파일 즉시 삭제
+                                    if (logFile.delete()) {
+                                        Log.d(TAG, "✅ Immediately deleted local file: ${logFile.name}")
+                                        // 대기 중인 로그도 초기화
+                                        pendingLogs.clear()
+                                    } else {
+                                        Log.w(TAG, "⚠️ Failed to delete local file: ${logFile.name}")
+                                    }
+                                } else {
+                                    Log.e(TAG, "❌ Failed to upload to GitHub")
+                                }
+                            } finally {
+                                // 임시 파일 삭제
+                                tempFile.delete()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing log file", e)
+                    }
+                } else {
+                    Log.d(TAG, "No log file found for today")
                 }
                 
                 // GitHub 연결 테스트
@@ -368,26 +312,11 @@ class LogManager(private val context: Context) {
                 }
                 Log.d(TAG, "GitHub connection test passed")
                 
-                // 프로덕션/개발 모드 확인
-                val isProduction = prefs.getBoolean("flutter.is_production", true)
-                Log.d(TAG, "Upload mode: ${if (isProduction) "PRODUCTION" else "DEVELOPMENT"}")
-                
-                // 각 파일 GitHub 업로드
-                filesToUpload.forEach { file ->
-                    try {
-                        Log.d(TAG, "Uploading ${file.name} to GitHub...")
-                        val success = githubUploader!!.uploadFile(file, shopCode, isProduction)
-                        if (success) {
-                            Log.d(TAG, "✅ Successfully uploaded ${file.name} to GitHub")
-                            file.delete() // 업로드 성공 시 파일 삭제
-                            Log.d(TAG, "Deleted local file: ${file.name}")
-                        } else {
-                            Log.e(TAG, "❌ Failed to upload ${file.name} to GitHub")
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "❌ Error uploading ${file.name} to GitHub", e)
-                        e.printStackTrace()
-                    }
+                // 레거시 JSON 파일 삭제
+                val jsonFile = todayFiles.find { it.name.endsWith(".json") }
+                if (jsonFile != null && jsonFile.exists()) {
+                    jsonFile.delete()
+                    Log.d(TAG, "Deleted legacy JSON file: ${jsonFile.name}")
                 }
                 
                 Log.d(TAG, "=== GITHUB UPLOAD END ===")
@@ -477,9 +406,21 @@ class LogManager(private val context: Context) {
         }
     }
     
+    // 즉시 업로드 트리거 (비정상 상황 발생 시)
+    private fun triggerImmediateUpload() {
+        Log.d(TAG, "Immediate upload triggered due to abnormal situation")
+        scope.launch {
+            try {
+                uploadToGitHub()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in immediate upload", e)
+            }
+        }
+    }
+    
     // 로그 파일 목록 가져오기
     fun getLogFiles(): List<File> {
-        return logDir.listFiles()?.filter { it.name.endsWith(".json") }
+        return logDir.listFiles()?.filter { it.name.endsWith(".log") || it.name.endsWith(".json") }
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
     }
     
@@ -498,10 +439,11 @@ class LogManager(private val context: Context) {
         }
     }
     
-    // 오래된 로그 정리
-    fun cleanOldLogs(daysToKeep: Int = 7) {
+    // 오래된 로그 정리 (더 엄격하게)
+    fun cleanOldLogs(daysToKeep: Int = 1) {
         scope.launch {
             try {
+                // 1일 이상 된 파일 삭제 (기본값 변경)
                 val cutoffTime = System.currentTimeMillis() - (daysToKeep * 24 * 60 * 60 * 1000L)
                 var totalSize = 0L
                 val files = logDir.listFiles()?.sortedByDescending { it.lastModified() } ?: emptyList()
@@ -509,11 +451,20 @@ class LogManager(private val context: Context) {
                 files.forEach { file ->
                     totalSize += file.length()
                     
-                    // 7일 이상 된 파일이거나 전체 크기가 100MB를 초과하면 삭제
-                    if (file.lastModified() < cutoffTime || totalSize > 100 * 1024 * 1024) {
-                        file.delete()
-                        Log.d(TAG, "Deleted log file: ${file.name}")
-                        totalSize -= file.length()
+                    // 1일 이상 된 파일이거나 전체 크기가 10MB를 초과하면 삭제
+                    if (file.lastModified() < cutoffTime || totalSize > 10 * 1024 * 1024) {
+                        if (file.delete()) {
+                            Log.d(TAG, "Deleted old log file: ${file.name}")
+                        }
+                    }
+                }
+                
+                // 현재 로그 파일도 크기 체크
+                currentLogFile?.let { file ->
+                    if (file.exists() && file.length() > 5 * 1024 * 1024) {
+                        // 5MB 초과 시 즉시 업로드 트리거
+                        Log.w(TAG, "Current log file exceeds 5MB, triggering upload")
+                        triggerImmediateUpload()
                     }
                 }
             } catch (e: Exception) {
@@ -547,6 +498,60 @@ class LogManager(private val context: Context) {
             Log.e(TAG, "Error getting recent logs", e)
             "[]"
         }
+    }
+    
+    private fun formatLogLine(type: String, datetime: String, data: JSONObject): String {
+        val parts = mutableListOf<String>()
+        
+        // 타입별 이모지 추가 (3가지 타입만)
+        val emoji = when(type) {
+            "비정상알림" -> "⚠️"
+            "시스템오류" -> "🔴"
+            "중요이벤트" -> "📌"
+            else -> "⚪"
+        }
+        
+        parts.add(emoji)
+        parts.add("[$type]")
+        parts.add("[$datetime]")
+        
+        when (type) {
+            "비정상알림" -> {
+                data.optString("앱").takeIf { it.isNotEmpty() }?.let { parts.add("[$it]") }
+                data.optString("알림ID").takeIf { it.isNotEmpty() }?.let { parts.add("[ID:$it]") }
+                data.optString("발생시간").takeIf { it.isNotEmpty() }?.let { parts.add("[발생:$it]") }
+                data.optJSONObject("메모리상태")?.let { memory ->
+                    val available = memory.optLong("system_available_memory", -1)
+                    val lowMemory = memory.optBoolean("system_low_memory", false)
+                    if (available >= 0) parts.add("[가용메모리:${available}MB]")
+                    if (lowMemory) parts.add("[메모리부족]")
+                }
+                data.optJSONObject("추가정보")?.let { parts.add("[extras:$it]") }
+            }
+            "시스템오류" -> {
+                data.optString("위치").takeIf { it.isNotEmpty() }?.let { parts.add("[위치:$it]") }
+                data.optString("메시지").takeIf { it.isNotEmpty() }?.let { parts.add("[메시지:$it]") }
+                data.optString("클래스").takeIf { it.isNotEmpty() }?.let { parts.add("[클래스:$it]") }
+                data.optString("상황").takeIf { it.isNotEmpty() }?.let { parts.add("[상황:$it]") }
+            }
+            "중요이벤트" -> {
+                data.optString("event").takeIf { it.isNotEmpty() }?.let { parts.add("[이벤트:$it]") }
+                data.optString("details").takeIf { it.isNotEmpty() }?.let { parts.add("[상세:$it]") }
+            }
+            else -> {
+                // 기타 타입은 모든 필드를 표시
+                val iter = data.keys()
+                while (iter.hasNext()) {
+                    val key = iter.next()
+                    if (key != "type" && key != "timestamp") {
+                        val value = data.get(key)
+                        parts.add("[$key:$value]")
+                    }
+                }
+            }
+        }
+        
+        return parts.joinToString(" ")
     }
     
     fun destroy() {
