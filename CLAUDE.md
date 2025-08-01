@@ -454,6 +454,8 @@ flutter run -d <device_id>
 - **로그 최적화**:
   - 단순한 텍스트 형식으로 변경 (JSON 파싱 오버헤드 제거)
   - 이모지로 로그 타입 구분 (⚠️ 비정상알림, 🔴 시스템오류, 📌 중요이벤트)
+- **큐 처리 최적화**:
+  - 큐 처리 주기를 1초에서 10초로 변경 (CPU/배터리 사용량 감소)
 
 ### Version 1.0.41 (2025-07-29)
 - **Accessibility Service**: Implemented SnapPayAccessibilityService for automatic lockscreen dismissal on KakaoPay notifications

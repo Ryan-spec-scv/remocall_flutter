@@ -93,7 +93,7 @@ class NotificationQueueService(private val context: Context) {
                 override fun run() {
                     checkAndProcessQueue()
                 }
-            }, 0, 1000)  // 즉시 시작, 1초마다 확인
+            }, 0, 10000)  // 즉시 시작, 10초마다 확인
             
             Log.d(TAG, "Queue processor started")
         }
