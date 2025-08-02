@@ -28,6 +28,12 @@ class NotificationService : NotificationListenerService() {
         private const val KAKAO_TEST_PACKAGE = "com.test.kakaonotifier.kakao_test_notifier"
         private const val NOTIFICATION_CHANNEL_ID = "depositpro_notification_listener"
         private const val NOTIFICATION_ID = 1001
+        
+        // 중복 알림 방지를 위한 캐시
+        private val recentNotifications = java.util.Collections.synchronizedMap(
+            mutableMapOf<String, Long>()
+        )
+        private const val DUPLICATE_THRESHOLD_MS = 1000L
     }
     
     private lateinit var logManager: LogManager
@@ -106,18 +112,35 @@ class NotificationService : NotificationListenerService() {
             val text = extras.getString(Notification.EXTRA_TEXT) ?: ""
             val bigText = extras.getString(Notification.EXTRA_BIG_TEXT) ?: text
             
-            // 카카오페이 비정상 알림 감지 (title과 text가 모두 비어있는 경우)
-            if (sbn.packageName == KAKAO_PAY_PACKAGE && title.isBlank() && text.isBlank() && bigText.isBlank()) {
-                // 비정상 상황 - 로그 기록
-                Log.w(TAG, "⚠️ Abnormal KakaoPay notification detected - empty content")
-                logAbnormalNotification(sbn, extras)
-                // 디버그용 원본 데이터 출력
-                logKakaoPayNotificationData(sbn, extras)
+            // extras를 JSONObject로 변환
+            val extrasJson = JSONObject()
+            extras.keySet().forEach { key ->
+                try {
+                    val value = extras.get(key)
+                    if (value != null) {
+                        extrasJson.put(key, value.toString())
+                    }
+                } catch (e: Exception) {
+                    // ignore
+                }
             }
             
-            // 빈 알림 체크 (카카오페이는 계속 처리)
-            if (title.isBlank() && bigText.isBlank() && sbn.packageName != KAKAO_PAY_PACKAGE) {
-                Log.d(TAG, "Empty notification from non-KakaoPay app, skipping")
+            // 모든 알림 로깅
+            logManager.logNotificationReceived(
+                packageName = sbn.packageName,
+                title = title,
+                message = bigText.ifEmpty { text },
+                extras = extrasJson
+            )
+            
+            // 빈 알림 체크
+            if (title.isBlank() && text.isBlank() && bigText.isBlank()) {
+                if (sbn.packageName == KAKAO_PAY_PACKAGE) {
+                    // 카카오페이의 빈 알림은 정상적인 그룹 업데이트
+                    Log.d(TAG, "Empty KakaoPay notification (likely group update)")
+                } else {
+                    Log.d(TAG, "Empty notification from ${sbn.packageName}, skipping")
+                }
                 return
             }
             
@@ -135,6 +158,24 @@ class NotificationService : NotificationListenerService() {
             // 큐에 추가만 함 (처리는 독립적인 프로세서가 담당)
             val message = bigText.ifEmpty { text }.ifEmpty { title }
             if (message.isNotBlank()) {
+                // 중복 알림 체크
+                val messageHash = "${sbn.packageName}:${message.hashCode()}"
+                val currentTime = System.currentTimeMillis()
+                
+                // 중복 알림 체크
+                val lastTime = recentNotifications[messageHash]
+                if (lastTime != null && currentTime - lastTime < DUPLICATE_THRESHOLD_MS) {
+                    Log.d(TAG, "Duplicate notification within ${DUPLICATE_THRESHOLD_MS}ms, skipping")
+                    return
+                }
+                
+                recentNotifications[messageHash] = currentTime
+                
+                // 오래된 항목 정리 (1분 이상 된 항목 제거)
+                recentNotifications.entries.removeIf { 
+                    currentTime - it.value > 60000L 
+                }
+                
                 val notificationId = queueService.enqueue(message)
                 if (notificationId != null) {
                     Log.d(TAG, "Notification added to queue: $notificationId")
@@ -225,62 +266,6 @@ class NotificationService : NotificationListenerService() {
         }
         Log.d(TAG, "=== END KAKAOPAY DATA ===")
         Log.d(TAG, "")
-    }
-    
-    /**
-     * 비정상 알림 로깅 (메모리 부족 등으로 인한 데이터 손실)
-     */
-    private fun logAbnormalNotification(
-        sbn: StatusBarNotification,
-        extras: android.os.Bundle
-    ) {
-        // extras를 JSON으로 변환
-        val extrasJson = JSONObject()
-        extras.keySet().forEach { key ->
-            try {
-                val value = extras.get(key)
-                if (value != null) {
-                    extrasJson.put(key, value.toString())
-                }
-            } catch (e: Exception) {
-                extrasJson.put(key, "Error: ${e.message}")
-            }
-        }
-        
-        // 메모리 정보 수집
-        val memoryInfo = getMemoryInfo()
-        
-        logManager.logAbnormalNotification(
-            packageName = sbn.packageName,
-            notificationId = sbn.id,
-            postTime = sbn.postTime,
-            extras = extrasJson,
-            memoryInfo = memoryInfo
-        )
-    }
-    
-    /**
-     * 시스템 메모리 정보 수집
-     */
-    private fun getMemoryInfo(): JSONObject {
-        val runtime = Runtime.getRuntime()
-        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-        val memoryInfo = android.app.ActivityManager.MemoryInfo()
-        activityManager.getMemoryInfo(memoryInfo)
-        
-        return JSONObject().apply {
-            // JVM 메모리 정보
-            put("jvm_total_memory", runtime.totalMemory() / 1024 / 1024) // MB
-            put("jvm_free_memory", runtime.freeMemory() / 1024 / 1024) // MB
-            put("jvm_max_memory", runtime.maxMemory() / 1024 / 1024) // MB
-            put("jvm_used_memory", (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024) // MB
-            
-            // 시스템 메모리 정보
-            put("system_available_memory", memoryInfo.availMem / 1024 / 1024) // MB
-            put("system_total_memory", memoryInfo.totalMem / 1024 / 1024) // MB
-            put("system_low_memory", memoryInfo.lowMemory)
-            put("system_threshold", memoryInfo.threshold / 1024 / 1024) // MB
-        }
     }
     
     /**

@@ -55,7 +55,17 @@ class LogManager(private val context: Context) {
             Log.e(TAG, "Failed to initialize GitHubUploader", e)
         }
         
-        // 주기적 업로드 제거 - 비정상 상황 시에만 업로드
+        // 주기적 업로드 - 5분마다
+        scope.launch {
+            while (isActive) {
+                delay(5 * 60 * 1000L) // 5분 대기
+                try {
+                    uploadToGitHub()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in periodic upload", e)
+                }
+            }
+        }
         
         // 주기적으로 오래된 로그 정리 (더 자주)
         scope.launch {
@@ -66,65 +76,80 @@ class LogManager(private val context: Context) {
         }
     }
     
-    // 중요 이벤트 로그 (서비스 시작/종료만)
+    // 서비스 라이프사이클 로그 (모든 이벤트)
     fun logServiceLifecycle(event: String, details: String = "") {
-        // 서비스 시작/종료만 로그 기록
-        if (event == "CREATED" || event == "DESTROYED") {
-            val log = JSONObject().apply {
-                put("type", "중요이벤트")
-                put("event", event)
-                if (details.isNotEmpty()) put("details", details)
-            }
-            writeLog(log)
+        val log = JSONObject().apply {
+            put("type", "서비스상태")
+            put("event", event)
+            if (details.isNotEmpty()) put("details", details)
         }
+        writeLog(log)
     }
     
-    // 비정상 알림 로그 (데이터가 손실된 알림만)
-    fun logAbnormalNotification(
+    // 알림 인식 로그
+    fun logNotificationReceived(
         packageName: String,
-        notificationId: Int,
-        postTime: Long,
-        extras: JSONObject? = null,
-        memoryInfo: JSONObject? = null
+        title: String,
+        message: String,
+        extras: JSONObject? = null
     ) {
         val simplifiedPackageName = when(packageName) {
             "com.kakaopay.app" -> "카카오페이"
             "com.kakao.talk" -> "카카오톡"
             "com.remocall.remocall_flutter" -> "스냅페이"
+            "com.test.kakaonotifier.kakao_test_notifier" -> "테스트앱"
             else -> packageName
         }
         
         val log = JSONObject().apply {
-            put("type", "비정상알림")
+            put("type", "알림인식")
             put("앱", simplifiedPackageName)
-            put("알림ID", notificationId)
-            put("발생시간", dateFormat.format(Date(postTime)))
+            if (title.isNotEmpty()) put("title", title)
+            if (message.isNotEmpty()) put("message", message)
             if (extras != null && extras.length() > 0) {
-                put("추가정보", extras)
-            }
-            if (memoryInfo != null) {
-                put("메모리상태", memoryInfo)
+                put("extras", extras)
             }
         }
         writeLog(log)
-        
-        // 비정상 상황 발생 시 즉시 업로드
-        triggerImmediateUpload()
     }
     
-    // 패턴 필터링 로그 - 제거 (불필요)
+    // 토큰 갱신 로그
+    fun logTokenRefresh(
+        event: String,  // "시작", "성공", "실패", "401재시도"
+        reason: String = "",  // "주기적", "401에러", "수동"
+        errorMessage: String = "",
+        oldTokenExpiry: Long = 0,
+        newTokenExpiry: Long = 0
+    ) {
+        val log = JSONObject().apply {
+            put("type", "토큰갱신")
+            put("event", event)
+            if (reason.isNotEmpty()) put("reason", reason)
+            if (errorMessage.isNotEmpty()) put("error", errorMessage)
+            if (oldTokenExpiry > 0) put("oldExpiry", dateFormat.format(Date(oldTokenExpiry)))
+            if (newTokenExpiry > 0) put("newExpiry", dateFormat.format(Date(newTokenExpiry)))
+        }
+        writeLog(log)
+    }
     
-    // 서버 전송 로그 - 제거 (불필요)
-    
-    // 실패 큐 로그 - 제거 (불필요)
-    
-    // 토큰 갱신 로그 - 제거 (불필요)
-    
-    // 큐 처리 로그 - 제거 (불필요)
-    
-    // 알림 파싱 로그 - 제거 (불필요)
-    
-    // 서버 응답 로그 - 제거 (불필요)
+    // 큐 처리 로그
+    fun logQueueProcessing(
+        event: String,  // "시작", "항목완료", "완료"
+        message: String = "",
+        queueSize: Int = 0,
+        status: String = "",
+        retryCount: Int = 0
+    ) {
+        val log = JSONObject().apply {
+            put("type", "큐처리")
+            put("event", event)
+            if (message.isNotEmpty()) put("message", message)
+            if (queueSize > 0) put("queueSize", queueSize)
+            if (status.isNotEmpty()) put("status", status)
+            if (retryCount > 0) put("retryCount", retryCount)
+        }
+        writeLog(log)
+    }
     
     // 시스템 오류 로그
     fun logError(location: String, error: Exception, context: String = "") {
@@ -503,9 +528,12 @@ class LogManager(private val context: Context) {
     private fun formatLogLine(type: String, datetime: String, data: JSONObject): String {
         val parts = mutableListOf<String>()
         
-        // 타입별 이모지 추가 (3가지 타입만)
+        // 타입별 이모지 추가
         val emoji = when(type) {
-            "비정상알림" -> "⚠️"
+            "알림인식" -> "🔔"
+            "서비스상태" -> "⚫"
+            "큐처리" -> "🟡"
+            "토큰갱신" -> "🔑"
             "시스템오류" -> "🔴"
             "중요이벤트" -> "📌"
             else -> "⚪"
@@ -516,17 +544,29 @@ class LogManager(private val context: Context) {
         parts.add("[$datetime]")
         
         when (type) {
-            "비정상알림" -> {
+            "알림인식" -> {
                 data.optString("앱").takeIf { it.isNotEmpty() }?.let { parts.add("[$it]") }
-                data.optString("알림ID").takeIf { it.isNotEmpty() }?.let { parts.add("[ID:$it]") }
-                data.optString("발생시간").takeIf { it.isNotEmpty() }?.let { parts.add("[발생:$it]") }
-                data.optJSONObject("메모리상태")?.let { memory ->
-                    val available = memory.optLong("system_available_memory", -1)
-                    val lowMemory = memory.optBoolean("system_low_memory", false)
-                    if (available >= 0) parts.add("[가용메모리:${available}MB]")
-                    if (lowMemory) parts.add("[메모리부족]")
-                }
-                data.optJSONObject("추가정보")?.let { parts.add("[extras:$it]") }
+                data.optString("title").takeIf { it.isNotEmpty() }?.let { parts.add("[title:$it]") }
+                data.optString("message").takeIf { it.isNotEmpty() }?.let { parts.add("[message:$it]") }
+                data.optJSONObject("extras")?.let { parts.add("[extras:$it]") }
+            }
+            "서비스상태" -> {
+                data.optString("event").takeIf { it.isNotEmpty() }?.let { parts.add("[이벤트:$it]") }
+                data.optString("details").takeIf { it.isNotEmpty() }?.let { parts.add("[상세:$it]") }
+            }
+            "큐처리" -> {
+                data.optString("event").takeIf { it.isNotEmpty() }?.let { parts.add("[이벤트:$it]") }
+                data.optString("message").takeIf { it.isNotEmpty() }?.let { parts.add("[message:$it]") }
+                data.optInt("queueSize", 0).takeIf { it > 0 }?.let { parts.add("[큐사이즈:$it]") }
+                data.optString("status").takeIf { it.isNotEmpty() }?.let { parts.add("[상태:$it]") }
+                data.optInt("retryCount", 0).takeIf { it > 0 }?.let { parts.add("[재시도:$it]") }
+            }
+            "토큰갱신" -> {
+                data.optString("event").takeIf { it.isNotEmpty() }?.let { parts.add("[이벤트:$it]") }
+                data.optString("reason").takeIf { it.isNotEmpty() }?.let { parts.add("[이유:$it]") }
+                data.optString("error").takeIf { it.isNotEmpty() }?.let { parts.add("[에러:$it]") }
+                data.optString("oldExpiry").takeIf { it.isNotEmpty() }?.let { parts.add("[이전만료:$it]") }
+                data.optString("newExpiry").takeIf { it.isNotEmpty() }?.let { parts.add("[새만료:$it]") }
             }
             "시스템오류" -> {
                 data.optString("위치").takeIf { it.isNotEmpty() }?.let { parts.add("[위치:$it]") }

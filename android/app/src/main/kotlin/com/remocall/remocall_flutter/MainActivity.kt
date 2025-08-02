@@ -32,6 +32,8 @@ import android.view.WindowManager
 import android.app.KeyguardManager
 import android.os.Handler
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.net.Uri
+import android.app.AlertDialog
 
 class MainActivity : FlutterActivity() {
     
@@ -74,12 +76,11 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "isServiceRunning" -> {
-                    // Check if notification listener service is enabled
+                    // 서비스 실행 상태만 확인하고 재시작하지 않음
                     val isRunning = isNotificationListenerEnabled()
-                    // 서비스가 실행 중이 아니면 재시작 시도
                     if (!isRunning) {
-                        Log.w(TAG, "NotificationService is not running, attempting to restart...")
-                        tryRestartNotificationService()
+                        Log.w(TAG, "NotificationService is not running (will be handled by Watchdog)")
+                        // tryRestartNotificationService() 호출 제거 - Watchdog이 관리
                     }
                     result.success(isRunning)
                 }
@@ -394,16 +395,18 @@ class MainActivity : FlutterActivity() {
             registerReceiver(notificationReceiver, filter)
         }
         
-        // NotificationListenerService 권한 확인 및 서비스 시작 유도
-        if (isNotificationServiceEnabled()) {
-            Log.d(TAG, "Notification service is enabled")
-            // 알림 접근 권한 재설정으로 서비스 재시작 유도
-            tryRestartNotificationService()
-        } else {
-            Log.d(TAG, "Notification service is not enabled")
+        // NotificationListenerService 권한 확인만 하고 재시작하지 않음
+        if (!isNotificationServiceEnabled()) {
+            Log.d(TAG, "Notification service permission not granted")
             // 권한 요청
             requestNotificationAccess()
+        } else {
+            Log.d(TAG, "Notification service permission already granted")
+            // 재시작하지 않음 - Android 시스템이 자동으로 시작함
         }
+        
+        // 배터리 최적화 체크
+        checkBatteryOptimization()
         
     }
     
@@ -995,6 +998,62 @@ class MainActivity : FlutterActivity() {
             // 대체 방법 시도
             val intent = Intent(Settings.ACTION_SETTINGS)
             startActivity(intent)
+        }
+    }
+    
+    // 배터리 최적화 체크
+    private fun checkBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                Log.d(TAG, "App is not exempted from battery optimization")
+                // 첫 실행 시 한 번만 표시하도록 SharedPreferences 사용
+                val prefs = getSharedPreferences("AppSettings", Context.MODE_PRIVATE)
+                val hasShownBatteryDialog = prefs.getBoolean("has_shown_battery_dialog", false)
+                
+                if (!hasShownBatteryDialog) {
+                    showBatteryOptimizationDialog()
+                    prefs.edit().putBoolean("has_shown_battery_dialog", true).apply()
+                }
+            } else {
+                Log.d(TAG, "App is already exempted from battery optimization")
+            }
+        }
+    }
+    
+    // 배터리 최적화 제외 다이얼로그
+    private fun showBatteryOptimizationDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("배터리 최적화 설정")
+            .setMessage("안정적인 카카오페이 알림 수신을 위해 배터리 최적화에서 제외하시겠습니까?\n\n설정하지 않으면 알림이 지연되거나 누락될 수 있습니다.")
+            .setPositiveButton("설정하기") { _, _ ->
+                requestBatteryOptimizationExemption()
+            }
+            .setNegativeButton("나중에", null)
+            .show()
+    }
+    
+    // 배터리 최적화 제외 요청
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                intent.data = Uri.parse("package:$packageName")
+                startActivity(intent)
+                Log.d(TAG, "Requesting battery optimization exemption")
+            } catch (e: Exception) {
+                Log.e(TAG, "Battery optimization request failed", e)
+                // 일부 기기에서 지원하지 않을 수 있으므로 대체 방법 제공
+                try {
+                    val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    startActivity(intent)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Alternative battery settings also failed", e2)
+                    // 최후의 수단으로 일반 설정으로 이동
+                    val intent = Intent(Settings.ACTION_SETTINGS)
+                    startActivity(intent)
+                }
+            }
         }
     }
 }

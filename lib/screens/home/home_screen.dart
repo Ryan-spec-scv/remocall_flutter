@@ -68,9 +68,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && Platform.isAndroid) {
-      // 앱이 포그라운드로 돌아왔을 때 접근성 서비스 상태 재확인
-      print('[HomeScreen] App resumed, checking accessibility service status...');
-      _checkAccessibilityService();
+      // 앱이 포그라운드로 돌아왔을 때는 체크하지 않음 - initState에서만 체크
+      print('[HomeScreen] App resumed (accessibility check skipped to prevent duplicates)');
     }
   }
   

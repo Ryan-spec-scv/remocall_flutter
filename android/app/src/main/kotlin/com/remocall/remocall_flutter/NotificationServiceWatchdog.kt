@@ -125,15 +125,9 @@ class NotificationServiceWatchdog : JobService() {
                     it.service.className == NotificationService::class.java.name 
                 }
                 
-                if (isServiceRunning) {
-                    // 서비스가 실행 중이면 rebind 시도
-                    Log.d(TAG, "🔄 Service is running but unhealthy - attempting rebind")
-                    val rebindIntent = Intent(this, NotificationService::class.java)
-                    rebindIntent.action = "REBIND"
-                    startService(rebindIntent)
-                } else {
+                if (!isServiceRunning) {
                     // 서비스가 죽었으면 재시작
-                    Log.d(TAG, "🔄 Service is not running - starting new instance")
+                    Log.w(TAG, "⚠️ Service not running - restarting")
                     val intent = Intent(this, NotificationService::class.java)
                     
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -141,14 +135,23 @@ class NotificationServiceWatchdog : JobService() {
                     } else {
                         startService(intent)
                     }
+                    
+                    Log.d(TAG, "✅ Service restart attempted")
+                } else {
+                    // 서비스는 실행 중이지만 unhealthy 상태
+                    Log.w(TAG, "⚠️ Service is running but appears unhealthy")
+                    
+                    // 헬스 상태를 unhealthy로 마킹
+                    healthPrefs.edit()
+                        .putBoolean("is_healthy", false)
+                        .putLong("last_health_issue", System.currentTimeMillis())
+                        .apply()
                 }
-                
-                Log.d(TAG, "✅ Service recovery attempted")
             }
             
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error in watchdog job", e)
-            // 에러 발생 시에도 안전하게 서비스 재시작 시도
+            // 에러 발생 시에는 안전을 위해 재시작 시도
             try {
                 val intent = Intent(this, NotificationService::class.java)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -156,6 +159,7 @@ class NotificationServiceWatchdog : JobService() {
                 } else {
                     startService(intent)
                 }
+                Log.d(TAG, "Service restart attempted after error")
             } catch (restartError: Exception) {
                 Log.e(TAG, "Failed to restart service after error", restartError)
             }

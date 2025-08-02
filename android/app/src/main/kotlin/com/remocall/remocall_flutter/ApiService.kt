@@ -48,7 +48,7 @@ class ApiService(private val context: Context) {
                 Log.e(TAG, "No access token available")
                 
                 // 토큰 갱신 시도
-                if (tokenManager.refreshToken()) {
+                if (tokenManager.refreshToken("401에러")) {
                     return sendNotificationWithToken(message, tokenManager.getAccessToken()!!)
                 }
                 
@@ -121,12 +121,15 @@ class ApiService(private val context: Context) {
                     // 토큰 만료
                     Log.e(TAG, "401 Unauthorized - Token expired")
                     
-                    if (!isRetry && tokenManager.refreshToken()) {
-                        // 토큰 갱신 성공, 재시도
-                        val newToken = tokenManager.getAccessToken()
-                        if (!newToken.isNullOrEmpty()) {
-                            Log.d(TAG, "Retrying with new token")
-                            return sendNotificationWithToken(message, newToken, true)
+                    if (!isRetry) {
+                        logManager.logTokenRefresh("401재시도", "401에러", "알림 전송 중 토큰 만료")
+                        if (tokenManager.refreshToken("401에러")) {
+                            // 토큰 갱신 성공, 재시도
+                            val newToken = tokenManager.getAccessToken()
+                            if (!newToken.isNullOrEmpty()) {
+                                Log.d(TAG, "Retrying with new token")
+                                return sendNotificationWithToken(message, newToken, true)
+                            }
                         }
                     }
                     

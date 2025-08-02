@@ -38,17 +38,20 @@ class TokenManager(private val context: Context) {
     }
     
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val logManager = LogManager.getInstance(context)
     
     /**
      * 토큰 갱신 수행
      */
-    fun refreshToken(): Boolean {
+    fun refreshToken(reason: String = "수동"): Boolean {
         try {
             Log.d(TAG, "Starting token refresh...")
+            logManager.logTokenRefresh("시작", reason)
             
             val refreshToken = getRefreshToken()
             if (refreshToken.isNullOrEmpty()) {
                 Log.e(TAG, "No refresh token available")
+                logManager.logTokenRefresh("실패", reason, "리프레시 토큰 없음")
                 return false
             }
             
@@ -93,11 +96,13 @@ class TokenManager(private val context: Context) {
                         saveTokens(newAccessToken, newRefreshToken)
                         
                         Log.d(TAG, "✅ Token refresh successful")
+                        logManager.logTokenRefresh("성공", reason)
                         return true
                     }
                 }
                 
                 Log.e(TAG, "Token refresh failed with status code: $responseCode")
+                logManager.logTokenRefresh("실패", reason, "HTTP $responseCode")
                 return false
                 
             } finally {
@@ -105,6 +110,7 @@ class TokenManager(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error refreshing token", e)
+            logManager.logTokenRefresh("실패", reason, e.message ?: "알 수 없는 오류")
             return false
         }
     }
@@ -155,7 +161,7 @@ class TokenManager(private val context: Context) {
             refreshTimer = Timer("TokenRefreshTimer")
             refreshTimer?.scheduleAtFixedRate(timerTask {
                 Log.d(TAG, "Running scheduled token refresh")
-                refreshToken()
+                refreshToken("주기적")
             }, intervalMillis, intervalMillis)
             
             isSchedulerRunning = true

@@ -68,7 +68,12 @@ class NotificationQueueService(private val context: Context) {
             val queueSize = getQueueSize()
             Log.d(TAG, "Added notification to queue. Queue size: $queueSize")
             
-            // 로그 제거 - 불필요
+            // 큐 저장 로그
+            logManager.logQueueProcessing(
+                event = "저장",
+                message = message,
+                queueSize = queueSize
+            )
             
             return notification.id
         } catch (e: Exception) {
@@ -258,7 +263,11 @@ class NotificationQueueService(private val context: Context) {
             return
         }
         
-        // 로그 제거 - 불필요
+        // 큐 처리 시작 로그
+        logManager.logQueueProcessing(
+            event = "시작",
+            queueSize = notifications.size
+        )
         
         for (notification in notifications) {
             try {
@@ -269,6 +278,15 @@ class NotificationQueueService(private val context: Context) {
                     // 성공 또는 중복: 큐에서 제거
                     removeFromQueue(notification.id)
                     Log.d(TAG, "Queue item processed successfully: ${notification.id}")
+                    
+                    // 항목 완료 로그
+                    logManager.logQueueProcessing(
+                        event = "항목완료",
+                        message = notification.message,
+                        queueSize = getQueueSize(),
+                        status = if (isDuplicate) "duplicate" else "success",
+                        retryCount = notification.retryCount
+                    )
                 } else {
                     // 실패: 큐에 남겨둠 (다음 주기에 재시도)
                     val updated = notification.copy(
@@ -277,12 +295,27 @@ class NotificationQueueService(private val context: Context) {
                     )
                     updateNotification(updated)
                     Log.w(TAG, "Queue item failed, will retry: ${notification.id}")
+                    
+                    // 항목 실패 로그
+                    logManager.logQueueProcessing(
+                        event = "항목실패",
+                        message = notification.message,
+                        queueSize = getQueueSize(),
+                        status = "failed",
+                        retryCount = updated.retryCount
+                    )
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing notification ${notification.id}", e)
                 logManager.logError("processAllQueueItems", e, "ID: ${notification.id}")
             }
         }
+        
+        // 큐 처리 완료 로그
+        logManager.logQueueProcessing(
+            event = "완료",
+            queueSize = getQueueSize()
+        )
     }
 }
 
