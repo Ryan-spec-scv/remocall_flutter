@@ -66,9 +66,6 @@ class MainActivity : FlutterActivity() {
                     val isEnabled = isNotificationListenerEnabled()
                     Log.d(TAG, "[MethodChannel] checkNotificationPermission result: $isEnabled")
                     
-                    // 권한 상태 로깅
-                    logManager.logServiceLifecycle("NOTIFICATION_PERMISSION_CHECK", "Enabled: $isEnabled")
-                    
                     result.success(isEnabled)
                 }
                 "requestNotificationPermission" -> {
@@ -236,9 +233,6 @@ class MainActivity : FlutterActivity() {
                 "isAccessibilityServiceEnabled" -> {
                     val isEnabled = isAccessibilityServiceEnabled()
                     Log.d(TAG, "Accessibility service enabled: $isEnabled")
-                    
-                    // 접근성 서비스 상태 로깅
-                    logManager.logServiceLifecycle("ACCESSIBILITY_SERVICE_CHECK", "Enabled: $isEnabled")
                     
                     result.success(isEnabled)
                 }

@@ -108,7 +108,9 @@ class NotificationService : NotificationListenerService() {
             val notification = sbn.notification
             val extras = notification.extras
             
-            val title = extras.getString(Notification.EXTRA_TITLE) ?: ""
+            val title = extras.getString(Notification.EXTRA_TITLE_BIG) 
+                ?: extras.getString(Notification.EXTRA_TITLE) 
+                ?: ""
             val text = extras.getString(Notification.EXTRA_TEXT) ?: ""
             val bigText = extras.getString(Notification.EXTRA_BIG_TEXT) ?: text
             
@@ -122,6 +124,19 @@ class NotificationService : NotificationListenerService() {
                     }
                 } catch (e: Exception) {
                     // ignore
+                }
+            }
+            
+            // 카카오페이 알림인 경우 추가 디버깅 정보
+            if (sbn.packageName == KAKAO_PAY_PACKAGE) {
+                extrasJson.put("notificationId", sbn.id)
+                extrasJson.put("key", sbn.key)
+                extrasJson.put("groupKey", sbn.groupKey ?: "null")
+                extrasJson.put("tag", sbn.tag ?: "null")
+                extrasJson.put("flags", notification.flags)
+                extrasJson.put("isGroupSummary", notification.flags and Notification.FLAG_GROUP_SUMMARY != 0)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    extrasJson.put("channelId", notification.channelId ?: "null")
                 }
             }
             

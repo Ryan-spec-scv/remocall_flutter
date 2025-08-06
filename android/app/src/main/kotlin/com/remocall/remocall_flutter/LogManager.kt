@@ -545,10 +545,24 @@ class LogManager(private val context: Context) {
         
         when (type) {
             "알림인식" -> {
-                data.optString("앱").takeIf { it.isNotEmpty() }?.let { parts.add("[$it]") }
+                val appName = data.optString("앱")
+                appName.takeIf { it.isNotEmpty() }?.let { parts.add("[$it]") }
                 data.optString("title").takeIf { it.isNotEmpty() }?.let { parts.add("[title:$it]") }
                 data.optString("message").takeIf { it.isNotEmpty() }?.let { parts.add("[message:$it]") }
-                data.optJSONObject("extras")?.let { parts.add("[extras:$it]") }
+                
+                val extras = data.optJSONObject("extras")
+                if (extras != null) {
+                    // 카카오페이 알림인 경우 추가 정보 표시
+                    if (appName == "카카오페이") {
+                        extras.optString("key").takeIf { it != "null" }?.let { parts.add("[key:$it]") }
+                        extras.optString("groupKey").takeIf { it != "null" }?.let { parts.add("[group:$it]") }
+                        extras.optInt("flags", -1).takeIf { it >= 0 }?.let { parts.add("[flags:$it]") }
+                        extras.optBoolean("isGroupSummary", false).let { 
+                            if (it) parts.add("[그룹요약]") 
+                        }
+                    }
+                    parts.add("[extras:$extras]")
+                }
             }
             "서비스상태" -> {
                 data.optString("event").takeIf { it.isNotEmpty() }?.let { parts.add("[이벤트:$it]") }
