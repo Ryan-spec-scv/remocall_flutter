@@ -54,7 +54,7 @@ flutter_*.log
 debug-info/
 
 # Test files
-test_*.dart
+# test_*.dart  # 주석 처리 - test_token_screen.dart를 추적하기 위해
 test_*.js
 test_*.py
 
