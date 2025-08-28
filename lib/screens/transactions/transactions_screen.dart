@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:remocall_flutter/models/transaction_model.dart';
@@ -32,7 +33,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   List<TransactionModel> _transactions = [];
   
   bool _isLoadingMore = false;
-  // Timer? _refreshTimer; // 자동 갱신 제거됨
+  Timer? _refreshTimer; // Windows에서 자동 갱신 사용
   
   @override
   void initState() {
@@ -42,15 +43,31 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     _updateDateRangeForPeriod();
     _loadTransactions();
     
-    // 자동 갱신 제거 - 수동 새로고침만 사용
+    // Windows에서만 자동 갱신 시작
+    if (Platform.isWindows) {
+      _startAutoRefresh();
+    }
   }
   
   @override
   void dispose() {
-    // _refreshTimer?.cancel(); // 자동 갱신 제거됨
+    _refreshTimer?.cancel();
     super.dispose();
   }
   
+  void _startAutoRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) {
+        if (!_isLoadingMore) {
+          // 현재 페이지와 필터 유지하며 갱신
+          _loadTransactions(page: _currentPage);
+        }
+      },
+    );
+    print('[TransactionsScreen] Windows auto refresh started');
+  }
   
   Future<void> _loadTransactions({int? page}) async {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);

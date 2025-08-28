@@ -30,7 +30,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const platform = MethodChannel('com.remocall/notifications');
   bool _hasNotificationAccess = false;
   bool _isAccessibilityServiceEnabled = false;
-  // Timer? _refreshTimer; // 자동 갱신 제거됨
+  Timer? _refreshTimer; // Windows에서 자동 갱신 사용
   bool _isFirstLoad = true;
   final UpdateService _updateService = UpdateService();
   bool _hasCheckedUpdate = false;
@@ -54,13 +54,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _startHealthCheck();
     }
     
-    // 자동 갱신 제거 - 수동 새로고침만 사용
+    // Windows에서만 자동 갱신 시작
+    if (Platform.isWindows) {
+      _startAutoRefresh();
+    }
   }
   
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    // _refreshTimer?.cancel(); // 자동 갱신 제거됨
+    _refreshTimer?.cancel();
     _healthCheckTimer?.cancel();
     super.dispose();
   }
@@ -70,6 +73,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed && Platform.isAndroid) {
       print('[HomeScreen] App resumed - checking accessibility service status');
       _checkAccessibilityService(); // 접근성 서비스 상태 다시 체크
+    }
+    
+    // Windows에서 앱 상태에 따라 타이머 관리
+    if (Platform.isWindows) {
+      if (state == AppLifecycleState.resumed) {
+        _startAutoRefresh();
+      } else if (state == AppLifecycleState.paused) {
+        _refreshTimer?.cancel();
+      }
     }
   }
   
@@ -225,6 +237,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await transactionProvider.loadDashboard(authProvider.accessToken!);
     }
     _isFirstLoad = false;
+  }
+  
+  void _startAutoRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(
+      AppConfig.refreshInterval, // 10초
+      (_) {
+        // Windows에서는 initial API를 사용하여 전체 데이터 갱신
+        _loadDataInitial();
+      },
+    );
+    print('[HomeScreen] Windows auto refresh started - using initial API');
   }
   
   Future<void> _loadDataBackground() async {

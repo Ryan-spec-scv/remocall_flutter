@@ -74,6 +74,15 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> with WidgetsBindi
       print('[ShopProfile] App resumed, checking permissions...');
       _checkPermissionsAndStatus();
     }
+    
+    // Windows에서 앱 상태에 따라 타이머 관리
+    if (Platform.isWindows) {
+      if (state == AppLifecycleState.resumed) {
+        _startAutoRefresh();
+      } else if (state == AppLifecycleState.paused) {
+        _refreshTimer?.cancel();
+      }
+    }
   }
   
   void _scrollToUpdateButton() {
@@ -160,7 +169,15 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> with WidgetsBindi
   }
   
   void _startAutoRefresh() {
-    // 자동 갱신 제거 - 수동 새로고침만 사용
+    // Windows에서만 자동 갱신
+    if (Platform.isWindows) {
+      _refreshTimer?.cancel();
+      _refreshTimer = Timer.periodic(
+        const Duration(seconds: 10),
+        (_) => _loadShopProfileBackground(),
+      );
+      print('[ShopProfile] Windows auto refresh started');
+    }
   }
   
   Future<void> _loadShopProfileInitial() async {
