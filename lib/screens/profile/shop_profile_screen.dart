@@ -28,7 +28,7 @@ class _ShopProfileScreenState extends State<ShopProfileScreen> with WidgetsBindi
   final currencyFormatter = NumberFormat.currency(locale: 'ko_KR', symbol: '₩');
   bool _isLoading = true;
   Map<String, dynamic>? _shopData;
-  // Timer? _refreshTimer; // 자동 갱신 제거됨
+  Timer? _refreshTimer; // Windows에서 자동 갱신 사용
   final UpdateService _updateService = UpdateService();
   bool _isCheckingUpdate = false;
   final GlobalKey _updateButtonKey = GlobalKey();
